@@ -69,6 +69,6 @@ if __name__ == "__main__":
     #     all_examples.append(examples)
     #     print("Preprocessed", file_name)
 
-    np.save(DATA_SAVE_DIR + "small_cap_example1.npy", examples)
+    np.save(DATA_SAVE_DIR + "small_cap_example.npy", examples)
 
     # print(np.load(DATA_SAVE_DIR + "small_cap_example.npy", allow_pickle=True).shape)

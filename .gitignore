@@ -1,1 +1,4 @@
 keys.json
+data/
+__pycache__/
+processed_data/

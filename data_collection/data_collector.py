@@ -1,3 +1,7 @@
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# pylint: disable=import-error
 from td_api import Account
 import pandas as pd
 
@@ -13,4 +17,5 @@ for ticker in tickers:
     if history_df is False:
         print("No data for", ticker)
         continue
-    history_df.to_csv("histories2/%s.csv" % ticker)
+    print(history_df)
+    # history_df.to_csv("histories2/%s.csv" % ticker)

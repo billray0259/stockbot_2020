@@ -1,11 +1,13 @@
 import pandas as pd
 import os
+from tqdm import tqdm
 
 HISTORIES_DIR = "/home/bill/stockbot_2020/data/histories/"
 DATA_SAVE_DIR = "/home/bill/stockbot_2020/data/"
 
+
 dataframes = []
-for data_file_name in os.listdir(HISTORIES_DIR):
+for data_file_name in tqdm(os.listdir(HISTORIES_DIR), desc="Joining candles"):
     ticker = data_file_name[:-len(".csv")]
     data_df = pd.read_csv(HISTORIES_DIR + data_file_name, index_col="datetime")
     data_df.columns = list(

@@ -36,11 +36,13 @@ def get_dataframe(arg_string, pages=None):
     return df.drop(columns=["No."]).set_index("Ticker")
 
 if __name__ == "__main__":
-    arg_string = "v=111&f=cap_small,sh_avgvol_o500&o=-volume"
+    save_directory = "/home/bill/stockbot_2020/data/"
+    save_file = "finviz_tech.csv"
+    arg_string = "v=111&f=sec_technology,sh_curvol_o500,sh_relvol_u2&o=-volume"
     
-    df = get_dataframe(arg_string, 1)
+    df = get_dataframe(arg_string)
     print(df.info())
     print(df.describe())
     print(df.head())
-    df.to_csv("test.csv")
+    df.to_csv(save_directory + save_file)
     

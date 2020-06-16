@@ -2,4 +2,4 @@ pandas
 keras
 numpy
 requests
-progressbar
+tqdm

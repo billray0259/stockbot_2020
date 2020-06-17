@@ -19,15 +19,15 @@ class TrainingDataCollector:
         self.data_dir = data_dir
         self.training_data_dir = training_data_dir
 
-        self.finviz_file = self.data_dir + self.name + "_finviz.csv"
+        self.finviz_file = self.data_dir + self.name + "_finviz.h5"
         self.histories_dir = self.data_dir + self.name + "_histories/"
 
-        self.joined_file = self.data_dir + self.name + "_joined.csv"
+        self.joined_file = self.data_dir + self.name + "_joined.h5"
 
         self.examples_file = self.training_data_dir + self.name + "_examples.npy"
         self.labels_file = self.training_data_dir + self.name + "_labels.npy"
 
-    def save_finviz_csv(self, pages=None):
+    def save_finviz(self, pages=None):
         session = requests.Session()
         session.headers.update({"User-Agent": "Chrome 80"})
 
@@ -62,7 +62,7 @@ class TrainingDataCollector:
             print("Collected:", len(df), end="\r", flush=True)
             i += 20
         df = df.drop(columns=["No."]).set_index("Ticker")
-        df.to_csv(self.finviz_file)
+        df.to_hdf(self.finviz_file, "df")
 
     def collect_histories(self, frequency=15, frequency_type="minute", days=365):
         account = Account(self.keys_json)
@@ -70,12 +70,12 @@ class TrainingDataCollector:
         if not os.path.exists(self.histories_dir):
             os.mkdir(self.histories_dir)
 
-        finviz_df = pd.read_csv(self.finviz_file)
+        finviz_df = pd.read_hdf(self.finviz_file)
         tickers = finviz_df["Ticker"]
 
         last_request_time = 0
         for ticker in tqdm(tickers):
-            ticker_history_save_file = self.histories_dir + "%s.csv" % ticker
+            ticker_history_save_file = self.histories_dir + "%s.h5" % ticker
             if os.path.exists(ticker_history_save_file):
                 # TODO load what is currently there and add any new data
                 continue
@@ -83,31 +83,32 @@ class TrainingDataCollector:
             last_request_time = time.time()
             history_df = account.history(ticker, frequency, days, frequency_type=frequency_type)
             if len(history_df) > 0:
-                history_df.to_csv(ticker_history_save_file)
-            
+                history_df.to_hdf(ticker_history_save_file, "df")
 
-    def join_candles_csv(self, save_to_file=True, dropna=True):
+    def join_candles(self, save_to_file=True):
         dataframes = []
         for data_file_name in tqdm(os.listdir(self.histories_dir), desc="Joining candles from %s" % self.histories_dir):
-            ticker = data_file_name[:-len(".csv")]
-            data_df = pd.read_csv(
-                self.histories_dir + data_file_name, index_col="datetime")
+            ticker = os.path.basename(data_file_name)
+            data_df = pd.read_hdf(self.histories_dir + data_file_name, index_col="datetime")
             data_df.columns = list(
                 map(lambda column: ticker + "_" + column, data_df.columns))
             dataframes.append(data_df)
 
         big_df = dataframes[0].join(dataframes[1:])
-        if dropna:
-            big_df = big_df.dropna(axis=1)
 
         if save_to_file:
-            big_df.to_csv(self.joined_file)
+            big_df.to_hdf(self.joined_file, "df")
             print("Saved joined candles to " + self.joined_file)
         else:
             return big_df
+    
+    # def fillna(self, na_col_thresh, )
+    
+    # def get_correlation_matrix(self, candle_key="close"):
+    #         df = pd.read_hdf(self.joined_file)
 
     def preprocess(self, example_length=64, save_to_file=True):
-        candles = pd.read_csv(self.joined_file, index_col="datetime")
+        candles = pd.read_hdf(self.joined_file, index_col="datetime")
         all_examples = []
         all_labels = []
         tickers = set(
@@ -141,10 +142,12 @@ class TrainingDataCollector:
                   (self.examples_file, self.labels_file))
         else:
             return examples, labels
-
+    
+        
+        
 
 if __name__ == "__main__":
 
     tdc = TrainingDataCollector("all", "v=111&o=-marketcap")
     # tdc.collect_histories(days=365)
-    tdc.join_candles_csv(dropna=False)
+    tdc.join_candles()

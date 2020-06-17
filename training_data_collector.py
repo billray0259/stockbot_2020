@@ -5,8 +5,7 @@ import os
 from tqdm import tqdm
 from td_api import Account
 import numpy as np
-from threading import Thread
-import concurrent.futures
+from concurrent.futures import ProcessPoolExecutor
 import time
 
 
@@ -23,6 +22,7 @@ class TrainingDataCollector:
         self.histories_dir = self.data_dir + self.name + "_histories/"
 
         self.joined_file = self.data_dir + self.name + "_joined.h5"
+        self.filled_file = self.data_dir + self.name + "_filled.h5"
 
         self.examples_file = self.training_data_dir + self.name + "_examples.npy"
         self.labels_file = self.training_data_dir + self.name + "_labels.npy"
@@ -62,7 +62,7 @@ class TrainingDataCollector:
             print("Collected:", len(df), end="\r", flush=True)
             i += 20
         df = df.drop(columns=["No."]).set_index("Ticker")
-        df.to_hdf(self.finviz_file, "df")
+        df.to_hdf(self.finviz_file, "df", "w")
 
     def collect_histories(self, frequency=15, frequency_type="minute", days=365):
         account = Account(self.keys_json)
@@ -83,12 +83,12 @@ class TrainingDataCollector:
             last_request_time = time.time()
             history_df = account.history(ticker, frequency, days, frequency_type=frequency_type)
             if len(history_df) > 0:
-                history_df.to_hdf(ticker_history_save_file, "df")
+                history_df.to_hdf(ticker_history_save_file, "df", "w")
 
     def join_candles(self, save_to_file=True):
         dataframes = []
         for data_file_name in tqdm(os.listdir(self.histories_dir), desc="Joining candles from %s" % self.histories_dir):
-            ticker = os.path.basename(data_file_name)
+            ticker, _ = os.path.splitext(os.path.basename(data_file_name))
             data_df = pd.read_hdf(self.histories_dir + data_file_name, index_col="datetime")
             data_df.columns = list(
                 map(lambda column: ticker + "_" + column, data_df.columns))
@@ -97,12 +97,21 @@ class TrainingDataCollector:
         big_df = dataframes[0].join(dataframes[1:])
 
         if save_to_file:
-            big_df.to_hdf(self.joined_file, "df")
+            big_df.to_hdf(self.joined_file, "df", "w")
             print("Saved joined candles to " + self.joined_file)
         else:
             return big_df
     
-    # def fillna(self, na_col_thresh, )
+    def drop_fillna(self, na_col_thresh=1, method="ffill", save_to_file=True):
+        candles = pd.read_hdf(self.joined_file, index_col="datetime")
+        invalid_columns = candles.columns[candles.isna().mean() > na_col_thresh]
+        candles.drop(columns=invalid_columns, inplace=True)
+        candles.fillna(method=method, inplace=True)
+        if save_to_file:
+            candles.to_hdf(self.filled_file, "df", "w")
+            print("Saved filled candles to " + self.filled_file)
+        else:
+            return candles
     
     # def get_correlation_matrix(self, candle_key="close"):
     #         df = pd.read_hdf(self.joined_file)
@@ -142,12 +151,8 @@ class TrainingDataCollector:
                   (self.examples_file, self.labels_file))
         else:
             return examples, labels
-    
-        
-        
 
 if __name__ == "__main__":
 
     tdc = TrainingDataCollector("all", "v=111&o=-marketcap")
-    # tdc.collect_histories(days=365)
-    tdc.join_candles()
+    tdc.drop_fillna()

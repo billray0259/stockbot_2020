@@ -8,7 +8,6 @@ import numpy as np
 import concurrent.futures
 import time
 
-
 class TrainingDataCollector:
 
     def __init__(self, name, finviz_filter, keys_json="keys.json", data_dir="data/", training_data_dir="training_data/"):
@@ -24,6 +23,8 @@ class TrainingDataCollector:
 
         self.joined_file = self.data_dir + self.name + "_joined.h5"
         self.filled_file = self.data_dir + self.name + "_filled.h5"
+
+        self.correlation_file = self.data_dir + self.name + "_correlation.h5"
 
         self.examples_file = self.training_data_dir + self.name + "_examples.npy"
         self.labels_file = self.training_data_dir + self.name + "_labels.npy"
@@ -83,7 +84,7 @@ class TrainingDataCollector:
             time.sleep(max(0, 0.5 - (time.time() - last_request_time)))
             last_request_time = time.time()
             history_df = account.history(ticker, frequency, days, frequency_type=frequency_type)
-            if len(history_df) > 0:
+            if len(history_df) > 1:
                 history_df.to_hdf(ticker_history_save_file, "df", "w")
 
     def join_candles(self, save_to_file=True, filled=False):
@@ -113,11 +114,7 @@ class TrainingDataCollector:
         else:
             return big_df
     
-    def join_filled_candles(self, save_to_file=True):
-        self.join_candles(save_to_file, filled=True)
-    
     def zero_volume_fill(self):
-
         if not os.path.exists(self.filled_histories_dir):
             os.mkdir(self.filled_histories_dir)
         
@@ -153,7 +150,21 @@ class TrainingDataCollector:
                 print("failed on", ticker)
                 print(e)
                 
+    def correlation_matrix(self, method="pearson"):
+        candles = pd.read_hdf(self.filled_file)
+        opens = candles.filter(like="_open")
+        closes = candles.filter(like="_close")
 
+        opens.columns = list(map(lambda column: column.split("_")[0], opens.columns))
+        closes.columns = list(map(lambda column: column.split("_")[0], closes.columns))
+
+        ratios = (closes / opens) - 1
+        ratios.fillna(0, inplace=True)
+
+        corr_mat = ratios.corr(method=method)
+        corr_mat.to_hdf(self.correlation_file, "df", "w")
+
+        
 
     def preprocess(self, example_length=64, save_to_file=True):
         candles = pd.read_hdf(self.joined_file, index_col="datetime")
@@ -194,4 +205,4 @@ class TrainingDataCollector:
 if __name__ == "__main__":
 
     tdc = TrainingDataCollector("all", "v=111&o=-marketcap")
-    tdc.join_candles(filled=True)
+    tdc.correlation_matrix()

@@ -5,7 +5,7 @@ import os
 from tqdm import tqdm
 from td_api import Account
 import numpy as np
-from concurrent.futures import ProcessPoolExecutor
+import concurrent.futures
 import time
 
 
@@ -20,6 +20,7 @@ class TrainingDataCollector:
 
         self.finviz_file = self.data_dir + self.name + "_finviz.h5"
         self.histories_dir = self.data_dir + self.name + "_histories/"
+        self.filled_histories_dir = self.data_dir + self.name + "_filled_histories/"
 
         self.joined_file = self.data_dir + self.name + "_joined.h5"
         self.filled_file = self.data_dir + self.name + "_filled.h5"
@@ -85,36 +86,74 @@ class TrainingDataCollector:
             if len(history_df) > 0:
                 history_df.to_hdf(ticker_history_save_file, "df", "w")
 
-    def join_candles(self, save_to_file=True):
+    def join_candles(self, save_to_file=True, filled=False):
         dataframes = []
-        for data_file_name in tqdm(os.listdir(self.histories_dir), desc="Joining candles from %s" % self.histories_dir):
+        if filled:
+            histories_dir = self.filled_histories_dir
+        else:
+            histories_dir = self.histories_dir
+
+        for data_file_name in tqdm(os.listdir(histories_dir), desc="Joining candles from %s" % histories_dir):
             ticker, _ = os.path.splitext(os.path.basename(data_file_name))
-            data_df = pd.read_hdf(self.histories_dir + data_file_name, index_col="datetime")
-            data_df.columns = list(
-                map(lambda column: ticker + "_" + column, data_df.columns))
+            data_df = pd.read_hdf(histories_dir + data_file_name, index_col="datetime")
+            if not filled:
+                data_df.columns = list(
+                    map(lambda column: ticker + "_" + column, data_df.columns))
             dataframes.append(data_df)
 
         big_df = dataframes[0].join(dataframes[1:])
 
         if save_to_file:
-            big_df.to_hdf(self.joined_file, "df", "w")
-            print("Saved joined candles to " + self.joined_file)
+            if filled:
+                big_df.to_hdf(self.filled_file, "df", "w")
+                print("Saved joined candles to " + self.filled_file)
+            else:
+                big_df.to_hdf(self.joined_file, "df", "w")
+                print("Saved joined candles to " + self.joined_file)
         else:
             return big_df
     
-    def drop_fillna(self, na_col_thresh=1, method="ffill", save_to_file=True):
-        candles = pd.read_hdf(self.joined_file, index_col="datetime")
-        invalid_columns = candles.columns[candles.isna().mean() > na_col_thresh]
-        candles.drop(columns=invalid_columns, inplace=True)
-        candles.fillna(method=method, inplace=True)
-        if save_to_file:
-            candles.to_hdf(self.filled_file, "df", "w")
-            print("Saved filled candles to " + self.filled_file)
-        else:
-            return candles
+    def join_filled_candles(self, save_to_file=True):
+        self.join_candles(save_to_file, filled=True)
     
-    # def get_correlation_matrix(self, candle_key="close"):
-    #         df = pd.read_hdf(self.joined_file)
+    def zero_volume_fill(self):
+
+        if not os.path.exists(self.filled_histories_dir):
+            os.mkdir(self.filled_histories_dir)
+        
+        tickers = pd.read_hdf(self.finviz_file).index
+        joined = pd.read_hdf(self.joined_file)
+
+        for ticker in tqdm(tickers):
+            try:
+                save_file = self.filled_histories_dir + "%s.h5" % ticker
+                if os.path.exists(save_file):
+                    continue
+                print(ticker)
+                df = joined.filter(regex="^%s_" % ticker)
+                open_, high, low, close, volume = df.columns
+                new_dict = {open_: [], high: [], low: [], close: [], volume: []}
+                price_cols = [open_, high, low, close]
+
+                last_close = 0
+                for time, row in df.iterrows():
+                    if row.isna().any():
+                        for col in price_cols:
+                            row[col] = last_close
+                        row[volume] = 0
+                    else:
+                        last_close = row[close]
+
+                    for key in new_dict:
+                        new_dict[key].append(row[key])
+
+                df = pd.DataFrame(new_dict, index=df.index)
+                df.to_hdf(save_file, "df", "w")
+            except Exception as e:
+                print("failed on", ticker)
+                print(e)
+                
+
 
     def preprocess(self, example_length=64, save_to_file=True):
         candles = pd.read_hdf(self.joined_file, index_col="datetime")
@@ -155,4 +194,4 @@ class TrainingDataCollector:
 if __name__ == "__main__":
 
     tdc = TrainingDataCollector("all", "v=111&o=-marketcap")
-    tdc.drop_fillna()
+    tdc.join_candles(filled=True)

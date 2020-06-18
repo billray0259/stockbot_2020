@@ -1,8 +1,8 @@
 import pandas as pd
 import os
-from tqdm import tqdm
 
-file_name = "/home/bill/stockbot_2020/data/all_joined.h5"
+filled_dir = "/home/bill/stockbot_2020/data/all_filled_histories/"
 
-df = pd.read_hdf(file_name)
-print(df)
+for file in os.listdir(filled_dir):
+    df = pd.read_hdf(os.path.join(filled_dir, file))
+    

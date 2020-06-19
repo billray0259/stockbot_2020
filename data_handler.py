@@ -5,8 +5,9 @@ import os
 from tqdm import tqdm
 from td_api import Account
 import numpy as np
-import concurrent.futures
 import time
+from scipy.cluster.vq import kmeans
+import pickle
 
 class DataHandler:
 
@@ -28,6 +29,8 @@ class DataHandler:
 
         self.examples_file = os.path.join(self.training_data_dir, self.name, "examples.npy")
         self.labels_file = os.path.join(self.training_data_dir, self.name, "labels.npy")
+
+        self.groups_file = os.path.join(self.data_dir, self.name, "groups.pkl")
 
     def save_finviz(self, pages=None):
         session = requests.Session()
@@ -150,7 +153,7 @@ class DataHandler:
                 print("failed on", ticker)
                 print(e)
                 
-    def correlation_matrix(self, method="pearson"):
+    def correlation_matrix(self, method="pearson", rolling_window=26):
         candles = pd.read_hdf(self.filled_file)
         opens = candles.filter(like="_open")
         closes = candles.filter(like="_close")
@@ -160,6 +163,7 @@ class DataHandler:
 
         ratios = (closes / opens) - 1
         ratios.fillna(0, inplace=True)
+        ratios = ratios.rolling(rolling_window).mean()
 
         corr_mat = ratios.corr(method=method)
         corr_mat.to_hdf(self.correlation_file, "df", "w")
@@ -167,7 +171,19 @@ class DataHandler:
 
     def get_groupings(self):
         corr_mat = pd.read_hdf(self.correlation_file)
-        return corr_mat
+
+        codebook, distortion = kmeans(corr_mat.to_numpy(), len(corr_mat) // 100 + 1)
+        tickers = corr_mat.columns
+        groups = []
+        for group in codebook:
+            groups.append([])
+            for item in group:
+                one_index = np.where(item == 1)[0]
+                ticker = tickers[one_index]
+                groups[-1].append(ticker)
+        
+        with open(self.groups_file, "wb") as groups_file:
+            pickle.dump(groups, groups_file)
         
 
     def preprocess(self, example_length=64, save_to_file=True):
@@ -208,5 +224,6 @@ class DataHandler:
 if __name__ == "__main__":
 
     dh = DataHandler("all", "v=111&o=-marketcap")
-
-    print(dh.get_groupings())
+    start = time.time()
+    print(dh.correlation_matrix())
+    print(time.time() - start)

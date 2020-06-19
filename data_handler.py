@@ -8,26 +8,26 @@ import numpy as np
 import concurrent.futures
 import time
 
-class TrainingDataCollector:
+class DataHandler:
 
-    def __init__(self, name, finviz_filter, keys_json="keys.json", data_dir="data/", training_data_dir="training_data/"):
+    def __init__(self, name, finviz_filter, keys_json="keys.json", data_dir="data/", training_data_dir="training_data"):
         self.finviz_filter = finviz_filter
         self.name = name
         self.keys_json = keys_json
         self.data_dir = data_dir
         self.training_data_dir = training_data_dir
 
-        self.finviz_file = self.data_dir + self.name + "_finviz.h5"
-        self.histories_dir = self.data_dir + self.name + "_histories/"
-        self.filled_histories_dir = self.data_dir + self.name + "_filled_histories/"
+        self.finviz_file = os.path.join(self.data_dir, self.name, "finviz.h5")
+        self.histories_dir = os.path.join(self.data_dir, self.name, "histories")
+        self.filled_histories_dir = os.path.join(self.data_dir, self.name, "filled_histories")
 
-        self.joined_file = self.data_dir + self.name + "_joined.h5"
-        self.filled_file = self.data_dir + self.name + "_filled.h5"
+        self.joined_file = os.path.join(self.data_dir, self.name, "joined.h5")
+        self.filled_file = os.path.join(self.data_dir, self.name, "filled.h5")
 
-        self.correlation_file = self.data_dir + self.name + "_correlation.h5"
+        self.correlation_file = os.path.join(self.data_dir, self.name, "correlation.h5")
 
-        self.examples_file = self.training_data_dir + self.name + "_examples.npy"
-        self.labels_file = self.training_data_dir + self.name + "_labels.npy"
+        self.examples_file = os.path.join(self.training_data_dir, self.name, "examples.npy")
+        self.labels_file = os.path.join(self.training_data_dir, self.name, "labels.npy")
 
     def save_finviz(self, pages=None):
         session = requests.Session()
@@ -164,6 +164,10 @@ class TrainingDataCollector:
         corr_mat = ratios.corr(method=method)
         corr_mat.to_hdf(self.correlation_file, "df", "w")
 
+
+    def get_groupings(self):
+        corr_mat = pd.read_hdf(self.correlation_file)
+        return corr_mat
         
 
     def preprocess(self, example_length=64, save_to_file=True):
@@ -180,8 +184,7 @@ class TrainingDataCollector:
             means = np.mean(examples)
             stds = np.std(examples)
             examples = (examples - means) / stds
-            next_closes = (next_closes - means.filter(like="close")
-                           ) / stds.filter(like="close")
+            next_closes = (next_closes - means.filter(like="close")) / stds.filter(like="close")
 
             for ticker in tickers:
                 example = examples.filter(regex="^%s_" % ticker)
@@ -204,5 +207,6 @@ class TrainingDataCollector:
 
 if __name__ == "__main__":
 
-    tdc = TrainingDataCollector("all", "v=111&o=-marketcap")
-    tdc.correlation_matrix()
+    dh = DataHandler("all", "v=111&o=-marketcap")
+
+    print(dh.get_groupings())

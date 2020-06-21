@@ -6,8 +6,9 @@ from tqdm import tqdm
 from td_api import Account
 import numpy as np
 import time
-from scipy.cluster.vq import kmeans
+from scipy.cluster.vq import kmeans, whiten
 import pickle
+import math
 
 class DataHandler:
 
@@ -169,19 +170,29 @@ class DataHandler:
         corr_mat.to_hdf(self.correlation_file, "df", "w")
 
 
-    def get_groupings(self):
+    def get_groupings(self, kmeans_trials=200):
         corr_mat = pd.read_hdf(self.correlation_file)
-
-        codebook, distortion = kmeans(corr_mat.to_numpy(), len(corr_mat) // 100 + 1)
         tickers = corr_mat.columns
-        groups = []
-        for group in codebook:
-            groups.append([])
-            for item in group:
-                one_index = np.where(item == 1)[0]
-                ticker = tickers[one_index]
-                groups[-1].append(ticker)
+        abs_ndarray = np.abs(corr_mat.to_numpy())
+
+        print("Running kmeans...\t%d" % time.time())
+        whitened = whiten(abs_ndarray)
+        codebook, distortion = kmeans(whitened, round(math.sqrt(len(corr_mat))), iter=kmeans_trials, check_finite=False)
+
+        print("Calculating centroid distances...\t%d" % time.time())
+        centroid_dists = []
+        for centroid in codebook:
+            dist = np.linalg.norm(whitened - centroid, axis=1)
+            centroid_dists.append(dist)
         
+        centroid_dists = np.array(centroid_dists).transpose()
+        groups = [[] for _ in range(len(codebook))]
+
+        print("Grouping...\t%d" % time.time())
+        for i, dist in enumerate(centroid_dists):
+            groups[dist.argmin()].append(tickers[i])
+        
+        print("Saving to %s....\t%d" % (self.groups_file, time.time()))
         with open(self.groups_file, "wb") as groups_file:
             pickle.dump(groups, groups_file)
         
@@ -224,6 +235,4 @@ class DataHandler:
 if __name__ == "__main__":
 
     dh = DataHandler("all", "v=111&o=-marketcap")
-    start = time.time()
-    print(dh.correlation_matrix())
-    print(time.time() - start)
+    dh.get_groupings()

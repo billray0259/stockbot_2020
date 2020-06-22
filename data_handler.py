@@ -12,26 +12,35 @@ import math
 
 class DataHandler:
 
-    def __init__(self, name, finviz_filter, keys_json="keys.json", data_dir="data/", training_data_dir="training_data"):
+    def __init__(self, name, finviz_filter="", keys_json="keys.json", data_dir="data/", training_data_dir="training_data"):
         self.finviz_filter = finviz_filter
         self.name = name
         self.keys_json = keys_json
-        self.data_dir = data_dir
+        self.data_dir = os.path.join(data_dir, name)
         self.training_data_dir = training_data_dir
 
-        self.finviz_file = os.path.join(self.data_dir, self.name, "finviz.h5")
-        self.histories_dir = os.path.join(self.data_dir, self.name, "histories")
-        self.filled_histories_dir = os.path.join(self.data_dir, self.name, "filled_histories")
+        if not os.path.exists(self.data_dir):
+            os.mkdir(self.data_dir)
 
-        self.joined_file = os.path.join(self.data_dir, self.name, "joined.h5")
-        self.filled_file = os.path.join(self.data_dir, self.name, "filled.h5")
+        self.finviz_file = os.path.join(self.data_dir, "finviz.h5")
 
-        self.correlation_file = os.path.join(self.data_dir, self.name, "correlation.h5")
+        self.histories_dir = os.path.join(self.data_dir, "histories")
+        if not os.path.exists(self.histories_dir):
+            os.mkdir(self.histories_dir)
+        
+        self.filled_histories_dir = os.path.join(self.data_dir, "filled_histories")
+        if not os.path.exists(self.filled_histories_dir):
+            os.mkdir(self.filled_histories_dir)
+
+        self.joined_file = os.path.join(self.data_dir, "joined.h5")
+        self.filled_file = os.path.join(self.data_dir, "filled.h5")
+
+        self.correlation_file = os.path.join(self.data_dir, "correlation.h5")
 
         self.examples_file = os.path.join(self.training_data_dir, self.name, "examples.npy")
         self.labels_file = os.path.join(self.training_data_dir, self.name, "labels.npy")
 
-        self.groups_file = os.path.join(self.data_dir, self.name, "groups.pkl")
+        self.groups_file = os.path.join(self.data_dir, "groups.pkl")
 
     def save_finviz(self, pages=None):
         session = requests.Session()
@@ -68,20 +77,19 @@ class DataHandler:
             print("Collected:", len(df), end="\r", flush=True)
             i += 20
         df = df.drop(columns=["No."]).set_index("Ticker")
+        if (df.values[-1] == df.values[-2]).all():
+            df = df[:-1]
         df.to_hdf(self.finviz_file, "df", "w")
 
     def collect_histories(self, frequency=15, frequency_type="minute", days=365):
         account = Account(self.keys_json)
 
-        if not os.path.exists(self.histories_dir):
-            os.mkdir(self.histories_dir)
-
         finviz_df = pd.read_hdf(self.finviz_file)
-        tickers = finviz_df["Ticker"]
+        tickers = finviz_df.index
 
         last_request_time = 0
         for ticker in tqdm(tickers):
-            ticker_history_save_file = self.histories_dir + "%s.h5" % ticker
+            ticker_history_save_file = os.path.join(self.histories_dir, "%s.h5" % ticker)
             if os.path.exists(ticker_history_save_file):
                 # TODO load what is currently there and add any new data
                 continue
@@ -100,7 +108,7 @@ class DataHandler:
 
         for data_file_name in tqdm(os.listdir(histories_dir), desc="Joining candles from %s" % histories_dir):
             ticker, _ = os.path.splitext(os.path.basename(data_file_name))
-            data_df = pd.read_hdf(histories_dir + data_file_name, index_col="datetime")
+            data_df = pd.read_hdf(os.path.join(histories_dir, data_file_name), index_col="datetime")
             if not filled:
                 data_df.columns = list(
                     map(lambda column: ticker + "_" + column, data_df.columns))
@@ -118,19 +126,15 @@ class DataHandler:
         else:
             return big_df
     
-    def zero_volume_fill(self):
-        if not os.path.exists(self.filled_histories_dir):
-            os.mkdir(self.filled_histories_dir)
-        
+    def zero_volume_fill(self):        
         tickers = pd.read_hdf(self.finviz_file).index
         joined = pd.read_hdf(self.joined_file)
 
         for ticker in tqdm(tickers):
             try:
-                save_file = self.filled_histories_dir + "%s.h5" % ticker
+                save_file = os.path.join(self.filled_histories_dir, "%s.h5" % ticker)
                 if os.path.exists(save_file):
                     continue
-                print(ticker)
                 df = joined.filter(regex="^%s_" % ticker)
                 open_, high, low, close, volume = df.columns
                 new_dict = {open_: [], high: [], low: [], close: [], volume: []}
@@ -170,14 +174,14 @@ class DataHandler:
         corr_mat.to_hdf(self.correlation_file, "df", "w")
 
 
-    def get_groupings(self, kmeans_trials=200):
+    def get_groupings(self):
         corr_mat = pd.read_hdf(self.correlation_file)
         tickers = corr_mat.columns
         abs_ndarray = np.abs(corr_mat.to_numpy())
 
         print("Running kmeans...\t%d" % time.time())
         whitened = whiten(abs_ndarray)
-        codebook, distortion = kmeans(whitened, round(math.sqrt(len(corr_mat))), iter=kmeans_trials, check_finite=False)
+        codebook, distortion = kmeans(whitened, round(math.sqrt(len(corr_mat))), check_finite=False)
 
         print("Calculating centroid distances...\t%d" % time.time())
         centroid_dists = []
@@ -192,9 +196,16 @@ class DataHandler:
         for i, dist in enumerate(centroid_dists):
             groups[dist.argmin()].append(tickers[i])
         
+        std = corr_mat.values.std(ddof=1)
+        means = {}
+        for group in groups:
+            group_corr = corr_mat.loc[group, group]
+            mean_corr = group_corr.mean().mean()
+            means[mean_corr/std] = group
+        
         print("Saving to %s....\t%d" % (self.groups_file, time.time()))
         with open(self.groups_file, "wb") as groups_file:
-            pickle.dump(groups, groups_file)
+            pickle.dump(means, groups_file)
         
 
     def preprocess(self, example_length=64, save_to_file=True):
@@ -232,7 +243,16 @@ class DataHandler:
         else:
             return examples, labels
 
+    def handle_data(self):
+        self.save_finviz()
+        self.collect_histories()
+        self.join_candles()
+        self.zero_volume_fill()
+        self.join_candles(filled=True)
+        self.correlation_matrix()
+        self.get_groupings()
+
 if __name__ == "__main__":
 
-    dh = DataHandler("all", "v=111&o=-marketcap")
-    dh.get_groupings()
+    data_handler = DataHandler("test", "v=111&f=ind_gold,sec_basicmaterials,sh_price_u1&o=-marketcap")
+    data_handler.handle_data()

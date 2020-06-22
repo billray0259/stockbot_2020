@@ -118,8 +118,13 @@ class Account:
             return candles_df
 
         data = response.json()
-        if data["empty"]:
-            print("No data for", ticker)
+        try:
+            if data["empty"]:
+                print("No data for", ticker)
+                return candles_df
+        except KeyError:
+            print("No key 'empty'")
+            print(response, response.text)
             return candles_df
 
         candles = data["candles"]

@@ -221,5 +221,5 @@ class DataHandler:
 
 if __name__ == "__main__":
 
-    data_handler = DataHandler("test", "v=111&f=ind_gold,sec_basicmaterials,sh_price_u1&o=-marketcap")
+    data_handler = DataHandler("vol500k", "v=111&f=ind_stocksonly,sh_avgvol_o500,sh_price_o2")
     data_handler.handle_data()

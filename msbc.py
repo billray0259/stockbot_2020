@@ -3,11 +3,7 @@ import numpy as np
 import pickle
 from tqdm import tqdm
 import os
-from keras.callbacks import ModelCheckpoint
-from keras.layers import LSTM, Dense
-from keras.models import Sequential
-import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
+import math
 
 from data_handler import DataHandler
 
@@ -15,6 +11,14 @@ class MultiSymbolBinaryClassifier:
 
     def __init__(self, name):
         self.data_handler = DataHandler(name)
+        self.dir = os.path.join(self.data_handler.data_dir, "msbc_training")
+
+        self.group_dirs = []
+        if os.path.exists(self.dir):
+            for item in os.listdir(self.dir):
+                if item.endswith("_group"):
+                    self.group_dirs.append(os.path.join(self.dir, item))
+        
 
     def preprocess(self, num_groups=3, candles_per_example=64):
         finviz = pd.read_hdf(self.data_handler.finviz_file)
@@ -40,7 +44,7 @@ class MultiSymbolBinaryClassifier:
             closes = tickers_df.filter(like="_close")
             for i in tqdm(range(candles_per_example, len(tickers_df)-1)):
                 example = tickers_df.iloc[i-candles_per_example:i]
-                next_close = closes.iloc[i+1]
+                next_close = closes.iloc[i]
 
                 means = np.mean(example)
                 stds = np.std(example)
@@ -56,7 +60,7 @@ class MultiSymbolBinaryClassifier:
 
             x, y = np.array(x), np.array(y)
 
-            dir_path = os.path.join(self.data_handler.data_dir, "msbc_training", biggest_ticker + "_group")
+            dir_path = os.path.join(self.dir, biggest_ticker + "_group")
             if not os.path.exists(dir_path):
                 os.makedirs(dir_path)
 
@@ -64,24 +68,56 @@ class MultiSymbolBinaryClassifier:
             y_file = os.path.join(dir_path, "y.npy")
             np.save(x_file, x)
             np.save(y_file, y)
-    
-    def train(self, data_file_name=None):
-        model = Sequential([
-            LSTM(32, activation="relu", input_shape=(64, 5), return_sequences=True),
-            LSTM(16, activation="relu", return_sequences=True),
-            LSTM(8, activation="relu"),
-            Dense(8, activation="relu"),
-            Dense(2, activation="softmax")
-        ])
 
 
-        model.compile(loss="categorical_crossentropy", optimizer="adam",
-                    metrics=["categorical_accuracy"])
+    def train(self, group_directory=None):
+        from keras.callbacks import ModelCheckpoint
+        from keras.layers import LSTM, Dense, Reshape
+        from keras.models import Sequential
+        from keras.activations import softmax
+        import os
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
-        epochs = 10
-        # model.fit(x, y, epochs=epochs, batch_size=256, validation_split=0.2)
-        # model.save("model")
+
+        group_dirs = self.group_dirs
+
+        if group_directory is not None:
+            group_dirs = [group_directory]
+        
+        for group_dir in group_dirs:
+            x_file = os.path.join(group_dir, "x.npy") 
+            y_file = os.path.join(group_dir, "y.npy") 
+            x = np.load(x_file)
+            y = np.load(y_file)
+
+            num_batches, num_samples, num_featrues = x.shape
+            _, group_size, _ = y.shape
+
+            print(x.shape, y.shape)
+
+
+            model = Sequential([
+                LSTM(round(num_featrues/2), input_shape=(num_samples, num_featrues), activation="relu", return_sequences=True),
+                LSTM(round(num_featrues/5), activation="relu"),
+                # LSTM(round(num_featrues/2), activation="relu"),
+                Dense(group_size*2, activation="relu"),
+                Reshape((group_size, 2)),
+                Dense(2, activation="softmax")
+            ])
+
+            model.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy"])
+            model.summary()
+
+            filepath = os.path.join(group_dir, "msbc_{epoch:02d}_{val_accuracy:.2f}.hdf5")
+            checkpoint = ModelCheckpoint(filepath, monitor='val_accuracy', verbose=1, save_best_only=True, mode='max')
+            callbacks = [checkpoint]
+
+            epochs = 100
+            # model.fit(x, y, epochs=epochs, batch_size=round(num_batches/200), validation_split=0.2, callbacks=callbacks)
+            model.fit(x, y, epochs=epochs, batch_size=round(math.sqrt(num_batches)), validation_split=0.2)
 
 
 if __name__ == "__main__":
-    pass
+    msbc = MultiSymbolBinaryClassifier("stocks_only")
+    msbc.preprocess(3, candles_per_example=128)
+    msbc.train()

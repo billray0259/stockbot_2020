@@ -113,12 +113,10 @@ class DataHandler:
             ticker, _ = os.path.splitext(os.path.basename(data_file_name))
             data_df = pd.read_hdf(os.path.join(histories_dir, data_file_name), index_col="datetime")
             if not filled:
-                data_df.columns = list(
-                    map(lambda column: ticker + "_" + column, data_df.columns))
+                data_df.columns = list(map(lambda column: ticker + "_" + column, data_df.columns))
             dataframes.append(data_df)
 
         big_df = dataframes[0].join(dataframes[1:])
-
         if save_to_file:
             if filled:
                 big_df.to_hdf(self.filled_file, "df", "w")
@@ -211,8 +209,8 @@ class DataHandler:
             pickle.dump(means, groups_file)
 
     def handle_data(self):
-        self.save_finviz()
-        self.collect_histories()
+        # self.save_finviz()
+        # self.collect_histories()
         self.join_candles()
         self.zero_volume_fill()
         self.join_candles(filled=True)

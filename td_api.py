@@ -1,5 +1,3 @@
-# https://developer.tdameritrade.com/apis
-
 import requests
 import json
 from datetime import datetime
@@ -11,6 +9,11 @@ import pandas as pd
 class Account:
 
     def __init__(self, keys_file_name):
+        """ Account object to interact with the TD Ameritrade API
+
+        Args:
+            keys_file_name (string): Path to JSON file used to connect to the TD Ameritrade API. Must contain refresh_token, client_id, and account_id.
+        """
         with open(keys_file_name, "r") as keys_file:
             keys = json.load(keys_file)
             self.refresh_token = keys["refresh_token"]
@@ -34,6 +37,9 @@ class Account:
             print("Account ID not found")
 
     def update_access_token(self):
+        """ Uses the refresh_token and client_id to get a fresh access_token.
+        """
+
         # https://developer.tdameritrade.com/authentication/apis/post/token-0
         url = r"https://api.tdameritrade.com/v1/oauth2/token"
         headers = {
@@ -51,6 +57,12 @@ class Account:
         self.access_token_update = datetime.now()
 
     def place_order(self, ticker, amount, side):
+        """ Places makret order with 'DAY' duration and 'NORMAL' session.
+        Args:
+            ticker (string): Symbol to trade.
+            amount ([type]): Number of shares to trade.
+            side ([type]): BUY or SELL
+        """
         # https://developer.tdameritrade.com/account-access/apis/post/accounts/%7BaccountId%7D/orders-0
         header = {
             'Authorization': "Bearer " + self.access_token,
@@ -83,12 +95,40 @@ class Account:
 
 
     def buy(self, ticker, amount):
-        return self.place_order(ticker, amount, "BUY")
+        """ Buys 'amount' shares of 'ticker'
+
+        Args:
+            ticker (string): Ticker to buy.
+            amount (int): Number of shares to buy
+        """
+        self.place_order(ticker, amount, "BUY")
 
     def sell(self, ticker, amount):
-        return self.place_order(ticker, amount, "SELL")
+        """ Sells 'amount' shares of 'ticker'
+
+        Args:
+            ticker (string): Ticker to sell.
+            amount (int): Number of shares to sell
+        """
+        self.place_order(ticker, amount, "SELL")
 
     def history(self, ticker, frequency, days, days_ago=0, frequency_type="minute", need_extended_hours_data=False):
+        """ Compiles a DataFrame containing candles for the given ticker
+
+        Args:
+            ticker (string): Ticker to retrieve history for
+            frequency (int): Number of frequency_type in a candle. 1, 5, 10, 15, or 30 if frequency_type is "minute" otherwise 1.
+            days (float): Number of days in the time frame of interest.
+            days_ago (int, optional): The most recent candle will be this many days old. Defaults to 0.
+            frequency_type (str, optional): The units of frequency. minute, daily, weekly, or monthly. Defaults to "minute".
+            need_extended_hours_data (bool, optional): True returns extended hours data, False returns market hours only. Defaults to False.
+
+        Returns:
+            DataFrame: With columns open, high, low, close, volume and index datetime
+        """
+
+        # https://developer.tdameritrade.com/price-history/apis/get/marketdata/%7Bsymbol%7D/pricehistory
+
         candles_df = pd.DataFrame(columns=["datetime", "open", "high", "low", "close", "volume"])
 
         day_ms = 1000*60*60*24

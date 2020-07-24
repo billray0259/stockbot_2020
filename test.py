@@ -1,25 +1,15 @@
-import matplotlib.pyplot as plt
-import os
-import numpy as np
+import td_api as td
 import pandas as pd
 
-xs = []
-ys = []
-path = "data/stocks_only/smabc_training"
-for item in os.listdir(path):
-    if os.path.isdir(os.path.join(path, item)):
-        xs.append(int(item))
-        accs = []
-        for file in os.listdir(os.path.join(path, item)):
-            name, ext = os.path.splitext(file)
-            if ext == ".hdf5":
-                accs.append(float(name.split("_")[1]))
-        ys.append(max(accs))
+acc = td.Account("keys.json")
+dfs = []
+for ticker in ["TSLA", "AMD", "GDS", "GOOG", "FB", "AMZN", "MOD", "SPY", "VXX", "AAPL", "SWCH"]:
+    options = acc.get_options_chain(ticker, strike_count=27)
+    dfs.append(options)
+    print(options)
 
-points = [(xs[i], ys[i]) for i in range(len(xs))]
+df = pd.concat(dfs)
 
-points.sort(key=lambda p: p[0])
+quotes = acc.get_quotes(df.index)
 
-points = np.array(points)
-plt.plot(points[:, 0], points[:, 1])
-plt.show()
+quotes.to_csv("test.csv")

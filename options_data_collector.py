@@ -111,4 +111,3 @@ elif sys.argv[1] == "collect":
         quotes.to_hdf(path, key="df", mode="w")
         quotes = None
         
-    print(1)

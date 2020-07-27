@@ -245,7 +245,7 @@ class Account:
             'apikey': self.client_id, 
             'symbol': symbols,
         }
-        print(payload)
+        
         response = requests.get(url=endpoint, headers=headers, params=payload)
         if response.status_code == 401:
             self.update_access_token()

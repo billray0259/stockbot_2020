@@ -89,6 +89,7 @@ class Account:
         response = self.session.post(url=endpoint, json=payload, headers=header)
         if response.status_code == 401:
             self.update_access_token()
+            headers = {'Authorization': "Bearer {}".format(self.access_token)}
             response = self.session.post(url=endpoint, json=payload, headers=header)
 
 
@@ -149,6 +150,7 @@ class Account:
         response = self.session.get(url=endpoint, params=payload, headers=headers)
         if response.status_code == 401:
             self.update_access_token()
+            headers = {'Authorization': "Bearer {}".format(self.access_token)}
             response = self.session.get(url=endpoint, params=payload, headers=headers)
         elif not response:
             print("Bad response when requesting history for", ticker)
@@ -210,6 +212,7 @@ class Account:
         response = requests.get(url=endpoint, headers=headers, params=payload)
         if response.status_code == 401:
             self.update_access_token()
+            headers = {'Authorization': "Bearer {}".format(self.access_token)}
             response = requests.get(url=endpoint, headers=headers, params=payload)
         
         json_data = response.json()
@@ -249,6 +252,7 @@ class Account:
         response = requests.get(url=endpoint, headers=headers, params=payload)
         if response.status_code == 401:
             self.update_access_token()
+            headers = {'Authorization': "Bearer {}".format(self.access_token)}
             response = requests.get(url=endpoint, headers=headers, params=payload)
         if not response:
             print(response, response.text)

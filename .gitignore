@@ -6,3 +6,6 @@ test.py
 models/
 test.py
 print_df.py
+options_data/
+symbols.txt
+tickers.txt

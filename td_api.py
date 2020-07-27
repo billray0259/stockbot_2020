@@ -216,15 +216,20 @@ class Account:
 
         dfs = []
         for map_name in ["putExpDateMap", "callExpDateMap"]:
-            date_map = json_data[map_name]
+            try:
+                date_map = json_data[map_name]
+            except KeyError:
+                continue
             for date in date_map:
                 strikes = date_map[date]
                 for strike in strikes:
                     contract = date_map[date][strike][0]
+                    if type(contract["optionDeliverablesList"]) is list:
+                        contract["optionDeliverablesList"] = contract["optionDeliverablesList"][0]
                     dfs.append(pd.DataFrame(contract, index=[0]))
         if len(dfs) == 0:
             print("No options data for", ticker)
-            return
+            return None
         df = pd.concat(dfs)
         df.set_index("symbol", inplace=True)
         return df
@@ -240,10 +245,15 @@ class Account:
             'apikey': self.client_id, 
             'symbol': symbols,
         }
+        print(payload)
         response = requests.get(url=endpoint, headers=headers, params=payload)
         if response.status_code == 401:
             self.update_access_token()
             response = requests.get(url=endpoint, headers=headers, params=payload)
+        if not response:
+            print(response, response.text)
+            return None
+
         json_data = response.json()
         
         dfs = []

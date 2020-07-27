@@ -3,3 +3,5 @@ keras
 numpy
 requests
 tqdm
+beautifulsoup4
+lxml

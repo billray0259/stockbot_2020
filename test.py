@@ -1,25 +1,53 @@
+import finnhub
+import time
 import matplotlib.pyplot as plt
-import os
-import numpy as np
 import pandas as pd
+import numpy as np
 
-xs = []
-ys = []
-path = "data/stocks_only/smabc_training"
-for item in os.listdir(path):
-    if os.path.isdir(os.path.join(path, item)):
-        xs.append(int(item))
-        accs = []
-        for file in os.listdir(os.path.join(path, item)):
-            name, ext = os.path.splitext(file)
-            if ext == ".hdf5":
-                accs.append(float(name.split("_")[1]))
-        ys.append(max(accs))
+with open("finnhub_key.txt", "r") as key_file:
+    config = finnhub.Configuration(
+        api_key={
+            "token": key_file.readline()
+        }
+    )
 
-points = [(xs[i], ys[i]) for i in range(len(xs))]
+client = finnhub.DefaultApi(finnhub.ApiClient(config))
 
-points.sort(key=lambda p: p[0])
+now = round(time.time())
+year = 60*60*24*365
 
-points = np.array(points)
-plt.plot(points[:, 0], points[:, 1])
+from_ = now - 5*year
+to = now
+
+def process(ticker):
+    candles = client.stock_candles(ticker, 'D', from_, to, _preload_content=False).data
+    try:
+        df = pd.read_json(candles)
+    except:
+        print(candles)
+        exit()
+    df.set_index("t", inplace=True)
+
+    df["log_returns"] = np.log(df["c"] / df["c"].shift(1))
+    df["returns"] = np.exp(df["log_returns"].cumsum())
+
+    mu = df["log_returns"].mean() * 7
+    sig = df["log_returns"].std() * 7**0.5
+    risk_free_interest_rate = 0
+
+    kelly = (mu - risk_free_interest_rate) / sig**2
+
+    return df, kelly
+
+
+df = pd.DataFrame()
+for ticker in ["ARKK", "ARKQ", "ARKW", "ARKG", "ARKF"]:
+    spy, spy_kelly = process(ticker)
+    print("%s Kelly" % ticker, spy_kelly)
+
+    df[ticker] = spy["returns"]
+
+df.index = pd.to_datetime(df.index, unit="s")
+
+df.plot()
 plt.show()

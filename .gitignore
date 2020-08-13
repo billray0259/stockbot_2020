@@ -6,3 +6,5 @@ test.py
 models/
 test.py
 print_df.py
+finnhub_key.txt
+test.ipynb

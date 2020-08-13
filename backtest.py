@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 from data_handler import DataHandler
-
+from smabc import SimpleMovingAverageBinaryClassifier
 
 class Trader:
 
@@ -41,7 +41,7 @@ class BackTest:
     
     def test(self):
         self.data["value"] = np.zeros(len(self.data))
-        for i, row in tqdm(self.data.iterrows()):
+        for i, row in self.data.iterrows():
             wanted_tickers = self.trader.wanted_tickers()
             columns = []
             for ticker in wanted_tickers:
@@ -54,11 +54,11 @@ class BackTest:
                 self.order(key, "sell", self.holdings[key], i)
 
             self.data["value"][i] = self.balance
+            print(str(i) + str(round(self.balance, 2)), end="\r", flush=True)
             
             for key in new_holdings:
                 share_price = self.data[ticker + "_open"][i]
                 amount = int(new_holdings[key] * self.balance / share_price)
-                print(new_holdings, self.balance, share_price)
                 self.order(key, "buy", amount, i)
 
     
@@ -73,21 +73,22 @@ class BackTest:
             self.holdings[ticker] += amount
         elif side.lower() == "sell":
             self.balance += total_price
-            self.holdings[ticker] += amount
+            self.holdings[ticker] -= amount
 
 
 class AAPLTrader(Trader):
 
     def wanted_tickers(self):
-        return ["AAPL"]
+        return ["TSLA"]
     
     def get_holdings(self, data, current_holdings):
-        return {"AAPL": 1}
+        return {"TSLA": 1}
     
 if __name__ == "__main__":
-
+    name = "stocks_only"
+    # trader = SimpleMovingAverageBinaryClassifier(name)
     trader = AAPLTrader()
-    test = BackTest("vol500k", trader)
+    test = BackTest(name, trader)
     test.test()
     test.data["value"].plot()
     plt.show()

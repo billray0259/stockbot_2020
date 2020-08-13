@@ -90,7 +90,7 @@ class Account:
         if response.status_code == 401:
             self.update_access_token()
             headers = {'Authorization': "Bearer {}".format(self.access_token)}
-            response = self.session.post(url=endpoint, json=payload, headers=header)
+            response = self.session.post(url=endpoint, json=payload, headers=headers)
 
 
     def buy(self, ticker, amount):

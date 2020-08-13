@@ -6,5 +6,7 @@ test.py
 models/
 test.py
 print_df.py
-finnhub_key.txt
-test.ipynb
+options_data/
+symbols.txt
+tickers.txt
+single_symbol_stockbot/finnhub_key.txt

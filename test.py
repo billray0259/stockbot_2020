@@ -1,6 +1,3 @@
-import finnhub
-import time
-import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 
@@ -49,5 +46,6 @@ for ticker in ["ARKK", "ARKQ", "ARKW", "ARKG", "ARKF"]:
 
 df.index = pd.to_datetime(df.index, unit="s")
 
-df.plot()
-plt.show()
+df = pd.read_hdf("options_data\\1595832579098.h5")
+
+print(df)

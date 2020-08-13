@@ -1,7 +1,6 @@
 import requests
 import json
-from datetime import datetime
-from datetime import timedelta
+from datetime import datetime, timedelta
 import time
 import pandas as pd
 
@@ -50,9 +49,8 @@ class Account:
             'refresh_token': self.refresh_token,
             'client_id': self.client_id
         }
-        response = self.session.post(url, headers=headers, data=payload)
-        access_token_json = self.session.post(
-            url, headers=headers, data=payload).json()
+
+        access_token_json = self.session.post(url, headers=headers, data=payload).json()
         self.access_token = access_token_json["access_token"]
         self.access_token_update = datetime.now()
 
@@ -91,6 +89,7 @@ class Account:
         response = self.session.post(url=endpoint, json=payload, headers=header)
         if response.status_code == 401:
             self.update_access_token()
+            headers = {'Authorization': "Bearer {}".format(self.access_token)}
             response = self.session.post(url=endpoint, json=payload, headers=header)
 
 
@@ -151,6 +150,7 @@ class Account:
         response = self.session.get(url=endpoint, params=payload, headers=headers)
         if response.status_code == 401:
             self.update_access_token()
+            headers = {'Authorization': "Bearer {}".format(self.access_token)}
             response = self.session.get(url=endpoint, params=payload, headers=headers)
         elif not response:
             print("Bad response when requesting history for", ticker)
@@ -173,4 +173,99 @@ class Account:
             {"volume": "int64", "datetime": "datetime64[ms]"})
         
         return candles_df.set_index("datetime")
+    
 
+    def get_options_chain(self, ticker, from_date=None, to_date=None, range_="ALL", strike=None, contract_type="ALL", strike_count=1, include_quotes=False, exp_month="ALL", option_type="ALL"):
+        # API documentation: https://developer.tdameritrade.com/option-chains/apis/get/marketdata/chains
+
+        if from_date is None:
+            from_date = datetime.now()
+        
+        if to_date is None:
+            to_date = datetime.now() + timedelta(days=30)
+
+        if type(from_date) is not str:
+            from_date = from_date.strftime("%Y-%m-%d'T'%H:%M:%S")
+        
+        if type(to_date) is not str:
+            to_date = to_date.strftime("%Y-%m-%d'T'%H:%M:%S")  
+        
+        headers = {'Authorization': "Bearer {}".format(self.access_token)}
+        endpoint = r'https://api.tdameritrade.com/v1/marketdata/chains'
+        payload = {
+            'apikey': self.client_id, 
+            'symbol': ticker,
+            'contractType': contract_type,
+            'strikeCount': strike_count,
+            'includeQuotes': include_quotes,
+            'fromDate': from_date,
+            'toDate': to_date,
+            'expMonth': exp_month,
+            'optionType': option_type,
+        }
+
+        if strike is not None:
+            payload["strike"] = strike
+        else:
+            payload["range"] = range_
+        
+        response = requests.get(url=endpoint, headers=headers, params=payload)
+        if response.status_code == 401:
+            self.update_access_token()
+            headers = {'Authorization': "Bearer {}".format(self.access_token)}
+            response = requests.get(url=endpoint, headers=headers, params=payload)
+        
+        json_data = response.json()
+
+        dfs = []
+        for map_name in ["putExpDateMap", "callExpDateMap"]:
+            try:
+                date_map = json_data[map_name]
+            except KeyError:
+                continue
+            for date in date_map:
+                strikes = date_map[date]
+                for strike in strikes:
+                    contract = date_map[date][strike][0]
+                    if type(contract["optionDeliverablesList"]) is list:
+                        contract["optionDeliverablesList"] = contract["optionDeliverablesList"][0]
+                    dfs.append(pd.DataFrame(contract, index=[0]))
+        if len(dfs) == 0:
+            print("No options data for", ticker)
+            return None
+        df = pd.concat(dfs)
+        df.set_index("symbol", inplace=True)
+        return df
+
+
+    def get_quotes(self, symbols):
+        if type(symbols) is not str:
+            symbols = ",".join(symbols)
+
+        headers = {'Authorization': "Bearer {}".format(self.access_token)}
+        endpoint = r'https://api.tdameritrade.com/v1/marketdata/quotes'
+        payload = {
+            'apikey': self.client_id, 
+            'symbol': symbols,
+        }
+        
+        response = requests.get(url=endpoint, headers=headers, params=payload)
+        if response.status_code == 401:
+            self.update_access_token()
+            headers = {'Authorization': "Bearer {}".format(self.access_token)}
+            response = requests.get(url=endpoint, headers=headers, params=payload)
+        if not response:
+            print(response, response.text)
+            return None
+
+        json_data = response.json()
+        
+        dfs = []
+        for symbol in json_data:
+            contract = json_data[symbol]
+            dfs.append(pd.DataFrame(contract, index=[0]))
+
+        df = pd.concat(dfs)
+        df.set_index("symbol", inplace=True)
+
+        return df

@@ -6,8 +6,9 @@ import os
 import math
 
 from data_handler import DataHandler
+from backtest import Trader
 
-class MultiSymbolBinaryClassifier:
+class MultiSymbolBinaryClassifier(Trader):
 
     def __init__(self, name):
         self.data_handler = DataHandler(name)
@@ -115,6 +116,7 @@ class MultiSymbolBinaryClassifier:
             epochs = 100
             # model.fit(x, y, epochs=epochs, batch_size=round(num_batches/200), validation_split=0.2, callbacks=callbacks)
             model.fit(x, y, epochs=epochs, batch_size=round(math.sqrt(num_batches)), validation_split=0.2)
+
 
 
 if __name__ == "__main__":

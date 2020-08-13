@@ -16,9 +16,18 @@ class SimpleMovingAverageBinaryClassifier:
         self.dir = os.path.join(self.data_handler.data_dir, "smabc_training")
         if sub_dir is not None:
             self.dir = os.path.join(self.dir, sub_dir)
+        self.model_name = "model.hdf5"
+        self.model_file = os.path.join(self.dir, self.model_name)
+        print(self.model_file)
 
-    def preprocess(self, pred_range=208, density=0.8, win1_start=1, win1_end=256, win1_step=8, win2_start=2, win2_end=1024, win2_step=32):
-        candles = pd.read_hdf(self.data_handler.filled_file)
+        self.model = None
+        if os.path.exists(self.model_file):
+            import keras
+            self.model = keras.models.load_model(self.model_file)
+
+    def preprocess(self, candles=None, pred_range=208, density=0.8, win1_start=1, win1_end=256, win1_step=8, win2_start=2, win2_end=1024, win2_step=32):
+        live = candles is not None
+        candles = pd.read_hdf(self.data_handler.filled_file) if not live else candles
         opens = candles.filter(like="_open")
         closes = candles.filter(like="_close")
 
@@ -29,9 +38,15 @@ class SimpleMovingAverageBinaryClassifier:
 
         vectors = []
         labels = []
-        for i in tqdm(range(win2_end, len(closes)-pred_range, 10)):
+        if live:
+            iterator = range(len(closes)-1, len(closes))
+        else:
+            iterator = tqdm(range(win2_end, len(closes)-pred_range, 10))
+        for i in iterator:
             features = []
-            labels.append(returns[i:i+pred_range].sum() > 0)
+
+            if not live:
+                labels.append(returns[i:i+pred_range].sum() > 0)
 
             win1 = win1_start
             while win1 < win1_end:
@@ -49,17 +64,16 @@ class SimpleMovingAverageBinaryClassifier:
             features = np.array(features)
             vectors.append(np.transpose(features))
 
+        vectors = np.array(vectors)
+        x = np.concatenate(vectors)
+        if live:
+            return x
+
         for i, label in enumerate(labels):
             labels[i] = list(map(lambda x: [0, 1] if x else [1, 0], label))
 
-        vectors = np.array(vectors)
         labels = np.array(labels)
-        
-        x = np.concatenate(vectors)
         y = np.concatenate(labels)
-
-        print(x.shape)
-        print(y.shape)
 
         if not os.path.exists(self.dir):
             os.makedirs(self.dir)
@@ -100,6 +114,15 @@ class SimpleMovingAverageBinaryClassifier:
         callbacks = [checkpoint]
 
         model.fit(x, y, epochs=epochs, batch_size=round(math.sqrt(num_batches)), validation_split=0.2, callbacks=callbacks)
+    
+    def wanted_tickers(self):
+        return ["TSLA"]
+
+    def get_holdings(self, data, current_holdings):
+        x = self.preprocess(data)
+        model = self.model
+        pred = model.predict(x)[0]
+        return {"TSLA": np.argmax(pred)}
 
 
 if __name__ == "__main__":

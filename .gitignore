@@ -9,3 +9,4 @@ print_df.py
 options_data/
 symbols.txt
 tickers.txt
+single_symbol_stockbot/finnhub_key.txt

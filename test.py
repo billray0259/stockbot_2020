@@ -1,8 +1,19 @@
+from scipy import stats
+from scipy import optimize
 import numpy as np
-from scipy.integrate import quad
 
-s = 1.175400343900767
-u = -0.4293767406319755
-f = lambda x: np.exp(-(x-u)/s)/(s*(1+np.exp(-(x-u)/s))**2)
+n = 100
+x = np.linspace(-4, 4, n)
 
-print(quad(f, u-2*s, u+2*s)[0])
+
+def f(x, mu, sigma): return stats.norm(mu, sigma).cdf(x)
+
+stats.logistic.cdf(3)
+
+
+data = f(x, 0.2, 1) + 0.05*np.random.randn(n)
+
+mu, sigma = optimize.curve_fit(f, x, data)[0]
+
+
+print(mu, sigma)

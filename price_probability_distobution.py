@@ -7,17 +7,11 @@ from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 from scipy.optimize import curve_fit
 from scipy.integrate import quad
-
-curves = {
-    "logistic": lambda x, u, s: 0.5 + 0.5*np.tanh((x-u)/(2*s))
-}
-
-distrobutions = {
-    "logistic": lambda x, u, s: np.exp(-(x-u)/s)/(s*(1+np.exp(-(x-u)/s))**2)
-}
+from scipy import stats
+import math
 
 
-def get_pdfs_from_deltas(options_chain, curve_type="logistic"):
+def get_pdfs_from_deltas(options_chain, distrobution=stats.logistic):
     
     data = options_chain
     # Make put deltas positive
@@ -35,21 +29,23 @@ def get_pdfs_from_deltas(options_chain, curve_type="logistic"):
         calls = group_data[group_data["putCall"] == "CALL"]
         puts = group_data[group_data["putCall"] == "PUT"]
 
-        call_x = calls["strikePrice"]
+        call_x = -calls["strikePrice"]
         call_y = calls["delta"]
 
         put_x = puts["strikePrice"]
         put_y = puts["delta"]
         
-        curve = curves[curve_type]
+        curve = lambda x, u, s: distrobution.cdf(x, u, s)
 
-        (call_u, call_s), call_pcov = curve_fit(curve, call_x, call_y, (calls["strikePrice"][0], -1))
-        call_s = -call_s
-        call_popt = (call_u, call_s)
+        call_popt, call_pcov = curve_fit(curve, call_x, call_y, (-mark, mark/10))
+        call_popt[0] *= -1
+        (call_u, call_s) = call_popt
 
         call_err = np.sqrt(np.sum(np.diag(call_pcov) / call_popt))
+
+        put_curve = lambda x, u, s: distrobution.cdf(x, u, s)
         
-        put_popt, put_pcov = curve_fit(curve, put_x, put_y, (puts["strikePrice"][0], 1))
+        put_popt, put_pcov = curve_fit(curve, put_x, put_y, (mark, mark/10))
         (put_u, put_s) = put_popt
 
         put_err = np.sqrt(np.sum(np.diag(put_pcov) / put_popt))
@@ -78,7 +74,7 @@ if __name__ == "__main__":
     symbol = input("Enter Symbol: ")
     days = int(input("Enter Days Out: "))
     # strike_count = int(input("Enter Strike Count: "))
-    strike_count = 100
+    strike_count = 50
 
     # symbol="AMD"
     # days=21
@@ -87,17 +83,17 @@ if __name__ == "__main__":
     from_date = datetime.now()
     to_date = from_date + timedelta(days=days)
     data = acc.get_options_chain(symbol, from_date, to_date, strike_count=strike_count)
-    # data.to_csv("temp.csv")
+    data.to_csv("temp.csv")
     # data = pd.read_csv("temp.csv", index_col="symbol")
     mark = acc.get_quotes([symbol])["mark"].iloc[0]
 
-    pdfs = get_pdfs_from_deltas(data)
+    pdfs = get_pdfs_from_deltas(data, distrobution=stats.logistic)
     for label in pdfs:
         u, s, errs = pdfs[label]
         err = 100 * np.linalg.norm(errs / (u, s))
         label += "\nmean: %.2f±%.2f%%\nstd: %.2f±%.2f%%\n" % (u, 100*errs[0]/u, s, 100*errs[1]/s)
 
-        distrobution = distrobutions["logistic"]
+        distrobution = stats.logistic.pdf
 
         x = np.linspace(mark-5*s, mark+5*s, 100)
         y = distrobution(x, u, s)
@@ -114,4 +110,6 @@ if __name__ == "__main__":
     plt.vlines(mark, *plt.gca().get_ylim(), label="Mark %.4f" % mark)
     plt.legend()
     plt.grid(True)
+    plt.title(symbol + " Probability Distributions given Deltas")
+    plt.xlabel("Share price ($)")
     plt.show()

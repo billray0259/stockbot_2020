@@ -10,3 +10,6 @@ options_data/
 symbols.txt
 tickers.txt
 single_symbol_stockbot/finnhub_key.txt
+temp.csv
+test.py
+test.ipynb

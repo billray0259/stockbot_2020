@@ -5,14 +5,15 @@ import numpy as np
 import td_api as td
 import time
 import os
+from os import path
 import sys
 import math
 from multiprocessing import Pool
 from selenium import webdriver
 
 #NUM_TICKERS = 100
-STRIKE_COUNT = 100
-NUM_QUOTES = 250
+STRIKE_COUNT = 50
+NUM_QUOTES = 350
 
 PERIOD_SECONDS = 60*10
 
@@ -50,11 +51,10 @@ def get_monthly_expiration_dates(num_dates):
     return expiration_days
 
 def get_fridays(startDate):
-    print(startDate)
     d = startDate
     x = 0
     fridays = []
-    while x < 7:
+    while x < 4:
         if d.weekday() == 4:
             x += 1
             fridays.append(d)
@@ -63,135 +63,99 @@ def get_fridays(startDate):
 
 
 account = td.Account("keys.json")
-if __name__ == '__main__':
-    if sys.argv[1] == 'test':
-        print(get_fridays(datetime.now()))
-    elif sys.argv[1] == "list":
-        driver = webdriver.Chrome()
-        driver.get('https://www.barchart.com/options/volume-leaders/stocks?page=all')
-        time.sleep(70)
-        tickers = []
-        for x in range(1, 1001):
-            tickers.append(driver.find_element_by_xpath('/html/body/div[2]/div/div[2]/div[2]/div/div/div/div/div/div[5]/div/div[2]/div/div/ng-transclude/table/tbody/tr['+str(x)+']/td[1]/div').text)
-        tickers = set(tickers)
-        with open("tickers.txt", "w") as tickers_file:
-            tickers_file.write("\n".join(tickers))
 
-        symbols = []
-        expiration_dates = get_fridays(datetime.now())
+def initalize():
+    if not path.exists('options_data'):
+        os.mkdir('options_data')
 
+def update_primary():
+    driver = webdriver.Chrome()
+    driver.get('https://www.barchart.com/options/volume-leaders/stocks?page=all')
+    time.sleep(70)
+    tickers = []
+    for x in range(1, 750):
+        tickers.append(driver.find_element_by_xpath('/html/body/div[2]/div/div[2]/div[2]/div/div/div/div/div/div[5]/div/div[2]/div/div/ng-transclude/table/tbody/tr['+str(x)+']/td[1]/div').text)
+    tickers = list(set(tickers))[:100]
+    now = datetime.now()
+    df = pd.DataFrame(columns=['Time', 'Ticker'])
+    for ticker in tickers:
+        df = df.append(pd.DataFrame(data={'Time': [now], 'Ticker': [ticker]}), ignore_index=True)
+    df.to_csv('options_data/primary_tickers.csv')
+
+def update_secondary():
+    if not path.exists('options_data/primary_tickers.csv'):
+        update_primary()
+    if not path.exists('options_data/secondary_tickers.csv'):
+        secondary = pd.DataFrame(columns=['Time', 'Ticker'])
+    else:
+        secondary = pd.read_csv('options_data/secondary_tickers.csv')
+    primary = pd.read_csv('options_data/primary_tickers.csv')
+    primary_time_tickers = list(zip(primary['Time'], primary['Ticker']))
+    secondary_time_tickers = list(zip(secondary['Time'], secondary['Ticker']))
+    primary_tickers = list(primary['Ticker'])
+    dropped_tickers = []
+    for time, ticker in secondary_time_tickers:
+        if ticker not in primary_tickers:
+            dropped_tickers.append((time, ticker))
+    for item in dropped_tickers:
+        primary_time_tickers.append(item)
+    df = pd.DataFrame(primary_time_tickers, columns =['Time', 'Ticker']) 
+    df.to_csv('options_data/secondary_tickers.csv')
+
+def gather_symbols():
+    symbols = []
+
+    last_request_time = time.time()
+    secondary = pd.read_csv('options_data/secondary_tickers.csv')
+    tickers = list(zip(secondary['Time'], secondary['Ticker']))
+    for timestamp, ticker in tickers:
+        from_date = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S.%f')
+        to_date = max(get_fridays(from_date)) 
+        time.sleep(max(0.001, 0.6 - (time.time() - last_request_time)))
         last_request_time = time.time()
-        for ticker in tickers:
-            from_date = datetime.now()
-            if from_date.month > 5:
-                to_date = datetime(from_date.year+1, (from_date.month+7)%12, from_date.day)
-            else:
-                to_date = datetime(from_date.year, from_date.month+7, from_date.day)
+        options_chain = account.get_options_chain(ticker, from_date=from_date, to_date=to_date, strike_count=STRIKE_COUNT)
+        symbols.extend(options_chain.index)
+        print("Collected: " + str(len(symbols)), end='\r', flush=True)
 
-            time.sleep(max(0, 0.6 - (time.time() - last_request_time)))
-            last_request_time = time.time()
-            options_chain = account.get_options_chain(ticker, from_date=from_date, to_date=to_date, strike_count=STRIKE_COUNT)
-            if options_chain is None:
-                continue
-            options_chain["expirationDate"] = pd.to_datetime(options_chain["expirationDate"], unit="ms")
-            is_monthly = [datetime(date.year, date.month, date.day) in expiration_dates for date in options_chain["expirationDate"]]
-            options_chain = options_chain[is_monthly]
+    with open("options_data/symbols.txt", "w+") as symbols_file:
+        print("Writing Symbols")
+        symbols_file.write("\n".join(symbols))
 
-            symbols.extend(options_chain.index)
-            print("Collected: " + str(len(symbols)), end='\r', flush=True)
+def collect_data():
+    with open("options_data/symbols.txt", "r") as symbols_file:
+        symbols = list(map(lambda x: x.strip(), symbols_file.readlines()))
 
-
-        with open("symbols.txt", "w+") as symbols_file:
-            print("Writing Symbols")
-            symbols_file.write("\n".join(symbols))
-
-    # if sys.argv[1] == "list":
-        # if os.path.exists("tickers.txt"):
-        #     with open("tickers.txt", "r") as tickers_file:
-        #         tickers = list(map(lambda x: x.strip(), tickers_file.readlines()))
-        # else:
-        #     dh = DataHandler("vol500k")
-        #     tickers = pd.read_hdf(dh.finviz_file).index
-
-        #     np.random.seed(0)
-        #     tickers = np.random.choice(tickers, size=NUM_TICKERS)
-        #     with open("tickers.txt", "w") as tickers_file:
-        #         tickers_file.write("\n".join(tickers))
-
-        # symbols = []
-
-        # expiration_dates = get_monthly_expiration_dates(6)
-
-        # last_request_time = time.time()
-        # for ticker in tickers:
-        #     from_date = datetime.now()
-        #     if from_date.month > 5:
-        #         to_date = datetime(from_date.year+1, (from_date.month+7)%12, from_date.day)
-        #     else:
-        #         to_date = datetime(from_date.year, from_date.month+7, from_date.day)
-
-        #     time.sleep(max(0, 0.6 - (time.time() - last_request_time)))
-        #     last_request_time = time.time()
-        #     options_chain = account.get_options_chain(ticker, from_date=from_date, to_date=to_date, strike_count=STRIKE_COUNT)
-        #     if options_chain is None:
-        #         continue
-        #     options_chain["expirationDate"] = pd.to_datetime(options_chain["expirationDate"], unit="ms")
-        #     is_monthly = [datetime(date.year, date.month, date.day) in expiration_dates for date in options_chain["expirationDate"]]
-        #     options_chain = options_chain[is_monthly]
-
-        #     symbols.extend(options_chain.index)
-        #     print("Collected: " + str(len(symbols)), end='\r', flush=True)
-
-
-        # with open("symbols.txt", "w+") as symbols_file:
-        #     print("Writing")
-        #     symbols_file.write("\n".join(symbols))
-
-    elif sys.argv[1] == 'collect':
-        with open("symbols.txt", "r") as symbols_file:
-            symbols = list(map(lambda x: x.strip(), symbols_file.readlines()))
-
-        symbol_batches = list(divide_chunks(symbols, 350))
-        p = Pool(len(symbol_batches))
-        past_minute = -1
-        while datetime.now().hour >= 16 + TIME_MOD_EST:
-            current_minute = datetime.now().minute
-            if current_minute != past_minute: 
-                past_minute = current_minute
-                now = datetime.now()
-                quotes = p.map(account.get_quotes, symbol_batches)
-                master_df = pd.DataFrame()
+    symbol_batches = list(divide_chunks(list(divide_chunks(symbols, 350)), 12))
+    past_time = time.time() - 60*10
+    while datetime.now().hour < 16 + TIME_MOD_EST:
+        now = time.time()
+        if now - past_time >= 60*10:
+            print("Collecting Data")
+            master_df = pd.DataFrame()
+            past_time = now
+            for x, symbol_batch in enumerate(symbol_batches):
+                p = Pool(12)
+                quotes = p.map(account.get_quotes, symbol_batch)
                 for quote in quotes:
                     master_df = master_df.append(quote)
-                master_df.to_csv('options_data/' + str(datetime.now()).replace(" ", '_') + '.csv')
                 quotes = None
+                print('Collected ' + str(x))
+                time.sleep(6)
+            string = str(datetime.now()).replace(" ", '-').replace(':', '-').split('.')[0] + '.csv'
+            master_df.to_csv('options_data/' + string)
+            print('Collected Data For ' + string)
 
-# elif sys.argv[1] == "collect":
-#     with open("symbols.txt", "r") as symbols_file:
-#         symbols = list(map(lambda x: x.strip(), symbols_file.readlines()))
-#     print('Got Symbols')
-#     start = 0
-#     wait_time = PERIOD_SECONDS / math.ceil(len(symbols) / NUM_QUOTES)
-#     last_request_time = time.time()
-#     fetched = 0
-#     print('Calculated Waits')
-#     while datetime.now().hour >= 16 + TIME_MOD_EST:
-#         if start + NUM_QUOTES >= len(symbols):
-#             symbols_to_fetch = symbols[start:]
-#             start = (start + NUM_QUOTES) % len(symbols)
-#             symbols_to_fetch.extend(symbols[:start])
-#             print('Prepped Fetched')
-#         else:
-#             symbols_to_fetch = symbols[start:start+NUM_QUOTES]
-#             print('Prepped Else Fetched')
+if __name__ == '__main__':
+    initalize()
+    if sys.argv[1] == 'update':
+        if sys.argv[2] == 'primary':
+            update_primary()
+        elif sys.argv[2] == 'secondary':
+            update_secondary()
 
-#         time.sleep(max(0, wait_time - (time.time() - last_request_time)))
-#         last_request_time = time.time()
-#         quotes = account.get_quotes(symbols_to_fetch)
-#         fetched += len(quotes)
-#         print('Fetched')
-#         print("Fetched:", fetched, end="\r", flush=True)
-#         path = os.path.join(SAVE_DIR, str(int(time.time()*1000)) + ".h5")
-#         quotes.to_hdf(path, key="df", mode="w")
-#         quotes = None
+    elif sys.argv[1] == "list":
+        gather_symbols()
+
+    elif sys.argv[1] == 'collect':
+        collect_data()
         

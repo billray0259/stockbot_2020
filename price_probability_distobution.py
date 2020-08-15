@@ -20,13 +20,15 @@ distrobutions = {
 def get_pdfs_from_deltas(options_chain, curve_type="logistic"):
     
     data = options_chain
+    # Make put deltas positive
     data["delta"] = np.abs(data["delta"])
-    
+
     date_groups = data.groupby(["expirationDate"])
     
     pdfs = {}
     for group in date_groups.groups:
         indicies = date_groups.groups[group]
+        # Get only the contracts for this single expiration date
         group_data = data.loc[indicies, :]
         label = pd.to_datetime(data["expirationDate"][indicies[0]], unit="ms").strftime("%Y-%m-%d")
 
@@ -56,8 +58,6 @@ def get_pdfs_from_deltas(options_chain, curve_type="logistic"):
         u = call_u * call_weight + put_u * put_weight
         s = call_s * call_weight + put_s * put_weight
 
-        # pdfs["call " + label] = (call_u, call_s)
-        # pdfs["put " + label] = (put_u, put_s)
         pdfs[label] = u, s
     
     return pdfs
@@ -66,19 +66,19 @@ def get_pdfs_from_deltas(options_chain, curve_type="logistic"):
 if __name__ == "__main__":
     acc = Account("keys.json")
 
-    # symbol = input("Enter Symbol: ")
-    # days = int(input("Enter Days Out: "))
-    # strike_count = int(input("Enter Strike Count: "))
+    symbol = input("Enter Symbol: ")
+    days = int(input("Enter Days Out: "))
+    strike_count = int(input("Enter Strike Count: "))
 
-    symbol="AMD"
-    days=21
-    strike_count=100
+    # symbol="AMD"
+    # days=21
+    # strike_count=100
 
-    # from_date = datetime.now() + timedelta(days=1)
-    # to_date = from_date + timedelta(days=days)
-    # data = acc.get_options_chain(symbol, from_date, to_date, strike_count=strike_count)
+    from_date = datetime.now()
+    to_date = from_date + timedelta(days=days)
+    data = acc.get_options_chain(symbol, from_date, to_date, strike_count=strike_count)
     # data.to_csv("temp.csv")
-    data = pd.read_csv("temp.csv", index_col="symbol")
+    # data = pd.read_csv("temp.csv", index_col="symbol")
     mark = acc.get_quotes([symbol])["mark"].iloc[0]
 
     pdfs = get_pdfs_from_deltas(data)

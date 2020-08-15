@@ -111,11 +111,12 @@ def gather_symbols():
     for timestamp, ticker in tickers:
         from_date = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S.%f')
         to_date = max(get_fridays(from_date)) 
-        time.sleep(max(0.001, 0.6 - (time.time() - last_request_time)))
-        last_request_time = time.time()
-        options_chain = account.get_options_chain(ticker, from_date=from_date, to_date=to_date, strike_count=STRIKE_COUNT)
-        symbols.extend(options_chain.index)
-        print("Collected: " + str(len(symbols)), end='\r', flush=True)
+        if datetime.now()-to_date > 0:
+            time.sleep(max(0.001, 0.6 - (time.time() - last_request_time)))
+            last_request_time = time.time()
+            options_chain = account.get_options_chain(ticker, from_date=from_date, to_date=to_date, strike_count=STRIKE_COUNT)
+            symbols.extend(options_chain.index)
+            print("Collected: " + str(len(symbols)), end='\r', flush=True)
 
     with open("options_data/symbols.txt", "w+") as symbols_file:
         print("Writing Symbols")

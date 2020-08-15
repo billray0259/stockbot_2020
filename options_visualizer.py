@@ -31,7 +31,7 @@ data["time"] = (pd.to_datetime(data["expirationDate"], unit="ms") - datetime.now
 data["ptheta"] = data["theta"] / data["mark"]
 call = data[data["putCall"] == "CALL"]
 put = data[data["putCall"] == "PUT"]
-put["delta"] = put["delta"] + 1
+# put["delta"] = put["delta"] + 1
 
 # date_groups = call.groupby(["expirationDate"])
 
@@ -46,12 +46,15 @@ while True:
     item = input("Enter Greek: ")
     if item == "exit":
         break
+    elif item == "list":
+        print(", ".join(data.columns))
+        continue
     
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
-    ax.scatter(put["time"], put["strikePrice"], put[item], marker="v")
-    ax.scatter(call["time"], call["strikePrice"], call[item], marker="^")        
+    ax.scatter(put["time"], put["pitm"], put[item], marker="v")
+    ax.scatter(call["time"], call["pitm"], call[item], marker="^")        
 
     ax.set_title("%s: %s vs Time and Strike" % (symbol, item))
     ax.set_xlabel("Days to expiration")

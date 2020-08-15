@@ -43,22 +43,31 @@ def get_pdfs_from_deltas(options_chain, curve_type="logistic"):
         
         curve = curves[curve_type]
 
-        (call_u, call_s), pcov = curve_fit(curve, call_x, call_y, (calls["strikePrice"][0], -1))
+        (call_u, call_s), call_pcov = curve_fit(curve, call_x, call_y, (calls["strikePrice"][0], -1))
         call_s = -call_s
+        call_popt = (call_u, call_s)
 
-        call_err = np.sqrt(np.sum(np.diag(pcov)))
+        call_err = np.sqrt(np.sum(np.diag(call_pcov) / call_popt))
         
-        (put_u, put_s), pcov = curve_fit(curve, put_x, put_y, (puts["strikePrice"][0], 1))
+        put_popt, put_pcov = curve_fit(curve, put_x, put_y, (puts["strikePrice"][0], 1))
+        (put_u, put_s) = put_popt
 
-        put_err = np.sqrt(np.sum(np.diag(pcov)))
-
+        put_err = np.sqrt(np.sum(np.diag(put_pcov) / put_popt))
+        
         call_weight = 1-(call_err/(call_err + put_err))
         put_weight = 1-(put_err/(call_err + put_err))
+
+        err = (call_weight * call_err + put_weight * put_err)
 
         u = call_u * call_weight + put_u * put_weight
         s = call_s * call_weight + put_s * put_weight
 
-        pdfs[label] = u, s
+        call_errs = np.sqrt(np.diag(call_pcov))
+        put_errs = np.sqrt(np.diag(put_pcov))
+
+        errs = call_errs * call_weight + put_errs * put_weight
+
+        pdfs[label] = u, s, errs
     
     return pdfs
 
@@ -68,7 +77,8 @@ if __name__ == "__main__":
 
     symbol = input("Enter Symbol: ")
     days = int(input("Enter Days Out: "))
-    strike_count = int(input("Enter Strike Count: "))
+    # strike_count = int(input("Enter Strike Count: "))
+    strike_count = 100
 
     # symbol="AMD"
     # days=21
@@ -83,16 +93,22 @@ if __name__ == "__main__":
 
     pdfs = get_pdfs_from_deltas(data)
     for label in pdfs:
-        u, s = pdfs[label]
-        label += "\nmean: %.2f\nstd: %.2f\n" % (u, s)
+        u, s, errs = pdfs[label]
+        err = 100 * np.linalg.norm(errs / (u, s))
+        label += "\nmean: %.2f±%.2f%%\nstd: %.2f±%.2f%%\n" % (u, 100*errs[0]/u, s, 100*errs[1]/s)
 
         distrobution = distrobutions["logistic"]
 
         x = np.linspace(mark-5*s, mark+5*s, 100)
         y = distrobution(x, u, s)
-        loss_odds = quad(lambda x: distrobution(x, u, s), 0, mark)[0]
 
-        label += "profit: %.2f" % (100*(1-loss_odds)) + "%\n"
+        loss_odds = quad(lambda x: distrobution(x, u, s), 0, mark)[0]
+        s_sign = 1 if u > mark else -1
+        loss_odds_min = quad(lambda x: distrobution(x, u+errs[0], s - errs[1]*s_sign), 0, mark)[0]
+        loss_odds_max = quad(lambda x: distrobution(x, u-errs[0], s + errs[1]*s_sign), 0, mark)[0]
+
+        label += "profit: %.2f%%-%.2f%%-%.2f%%\n" % (100*(1-loss_odds_max), 100*(1-loss_odds), 100*(1-loss_odds_min))
+        label += "err: %.2f\n" % err
         plt.plot(x, y, label=label)
 
     plt.vlines(mark, *plt.gca().get_ylim(), label="Mark %.4f" % mark)

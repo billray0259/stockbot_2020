@@ -1,19 +1,13 @@
-from scipy import stats
-from scipy import optimize
-import numpy as np
+from td_api import Account
+from datetime import datetime, timedelta
 
-n = 100
-x = np.linspace(-4, 4, n)
+acc = Account("keys.json")
 
 
-def f(x, mu, sigma): return stats.norm(mu, sigma).cdf(x)
+symbol = "AMD"
+days = 30
+strike_count = 50
 
-stats.logistic.cdf(3)
-
-
-data = f(x, 0.2, 1) + 0.05*np.random.randn(n)
-
-mu, sigma = optimize.curve_fit(f, x, data)[0]
-
-
-print(mu, sigma)
+from_date = datetime.now()
+to_date = from_date + timedelta(days=days)
+data = acc.get_options_chain(symbol, from_date, to_date, strike_count=strike_count)

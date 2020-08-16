@@ -51,7 +51,12 @@ class Account:
         }
 
         access_token_json = self.session.post(url, headers=headers, data=payload).json()
-        self.access_token = access_token_json["access_token"]
+        try:
+            self.access_token = access_token_json["access_token"]
+        except KeyError as e:
+            print(e)
+            print("access_token_json was:", access_token_json)
+            exit()
         self.access_token_update = datetime.now()
 
     def place_order(self, ticker, amount, side):
@@ -235,6 +240,24 @@ class Account:
             return None
         df = pd.concat(dfs)
         df.set_index("symbol", inplace=True)
+        # columns = [
+        #     "symbol",
+        #     "bidPrice",
+        #     "bidSize",
+        #     "askPrice",
+        #     "askSize",
+        #     "lastPrice",
+        #     "quoteTimeInLong",
+        #     "strikePrice",
+        #     "contractType",
+        #     "underlying",
+        #     "delta",
+        #     "gamma",
+        #     "theta",
+        #     "vega",
+        #     "rho",
+        #     "underlyingPrice"
+        # ] + an expiration column
         return df
 
 

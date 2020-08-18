@@ -287,7 +287,10 @@ class Account:
         for symbol in json_data:
             contract = json_data[symbol]
             dfs.append(pd.DataFrame(contract, index=[0]))
-
+        if len(dfs) == 0:
+            print("No symbols in json response")
+            print(json_data)
+            return None
         df = pd.concat(dfs)
         df.set_index("symbol", inplace=True)
 

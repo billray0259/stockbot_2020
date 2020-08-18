@@ -49,16 +49,19 @@ while True:
     elif item == "list":
         print(", ".join(data.columns))
         continue
-    
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
+    try:
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
 
-    ax.scatter(put["time"], put["pitm"], put[item], marker="v")
-    ax.scatter(call["time"], call["pitm"], call[item], marker="^")        
+        ax.scatter(put["time"], put["pitm"], put[item], marker="v")
+        ax.scatter(call["time"], call["pitm"], call[item], marker="^")        
 
-    ax.set_title("%s: %s vs Time and Strike" % (symbol, item))
-    ax.set_xlabel("Days to expiration")
-    ax.set_ylabel("% ITM")
-    ax.set_zlabel(item)
+        ax.set_title("%s: %s vs Time and Strike" % (symbol, item))
+        ax.set_xlabel("Days to expiration")
+        ax.set_ylabel("% ITM")
+        ax.set_zlabel(item)
 
-    plt.show()
+        plt.show()
+    except KeyError:
+        print("Unknown Key")
+        

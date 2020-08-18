@@ -4,12 +4,11 @@ import numpy as np
 import td_api as td
 import time
 import os
-from os import path
 import sys
 import math
 from multiprocessing import Pool
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
+from bs4 import BeautifulSoup
+import requests
 
 #NUM_TICKERS = 100
 STRIKE_COUNT = 50
@@ -69,46 +68,71 @@ def get_fridays(startDate):
 
 def initalize():
     os.chdir(os.path.dirname(__file__))
-    if not path.exists('options_data'):
-        print("Creating options_data directory")
-        os.mkdir('options_data')
+    if not os.path.exists(SAVE_DIR):
+        print("Creating %s directory" % SAVE_DIR)
+        os.mkdir(SAVE_DIR)
 
 
-def update_primary():
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    driver = webdriver.Chrome(options=chrome_options)
-    print("Loading barchart.com")
-    driver.get('https://www.barchart.com/options/volume-leaders/stocks?page=all')
-    xpath = '/html/body/div[2]/div/div[2]/div[2]/div/div/div/div/div/div[5]/div/div[2]/div/div/ng-transclude/table/tbody/tr[%d]/td[1]/div'
-    while len(driver.find_elements_by_xpath(xpath % 1)) == 0:
-        time.sleep(0.25)
-    print("Collecting tickers")
-    tickers = set([])
-    for i in range(1, 750):
-        ticker = driver.find_element_by_xpath(xpath % i).text
-        print(ticker + "\t%.0f%%" % (len(tickers)), end="\r", flush=True)
-        tickers.add(ticker)
-        if len(tickers) == 100:
-            break
-    now = datetime.now().strftime("%Y-%m-%d")
-    df = pd.DataFrame(columns=['Time', 'Ticker'])
-    for ticker in tickers:
-        df = df.append(pd.DataFrame(data={'Time': [now], 'Ticker': [ticker]}), ignore_index=True)
-    print("Saving tickers to primary_tickers.csv")
-    df.to_csv('options_data/primary_tickers.csv')
+def update_tickers():
+    """ 
+    options_data/tickers.csv is a series where the index is the tickers and the values are 
+    """
+    tickers_path = os.path.join(SAVE_DIR, "tickers.csv")
+    if not os.path.exists(tickers_path):
+        open(tickers_path, "w").close()
+        saved_tickers = None
+    else:
+        saved_tickers = pd.read_csv(tickers_path)
+
+    page = requests.get("https://research.investors.com/options-center/reports/option-volume", headers={"User-Agent": "Chrome"})
+    soup = BeautifulSoup(page.text, features="lxml")
+
+    items = soup.findAll("a", {"class": "stockRoll"})
+    fresh_tickers = [item.text for item in items][:100]
+    date_format = "%Y-%m-%d"
+    date_string = datetime.now().strftime(date_format)
+    dates = [date_string] * len(fresh_tickers)
+    fresh_tickers = pd.Series(dates, index=fresh_tickers)
+
+    if saved_tickers is None:
+        fresh_tickers.to_csv(tickers_path)
+        return
+
+    old_tickers = []
+    new_tickers = []
+    for ticker in fresh_tickers:
+        if ticker in saved_tickers:
+            old_tickers.append(ticker)
+        else:
+            new_tickers.append(ticker)
+
+    saved_tickers[old_tickers] = fresh_tickers[date_string]
+
+    for ticker, date in saved_tickers.iteritems():
+        if datetime.strptime(date, date_format) < datetime.now() - timedelta(days=30):
+            del saved_tickers[ticker]
+    
+    saved_tickers.append(fresh_tickers[new_tickers])
+
+    saved_tickers.to_csv(fresh_tickers)
+
+    
 
 
+
+'''
 def update_secondary():
+    """ 
+    """
     if not path.exists('options_data/primary_tickers.csv'):
         update_primary()
     if not path.exists('options_data/secondary_tickers.csv'):
         secondary = pd.DataFrame(columns=['Time', 'Ticker'])
     else:
-        secondary = pd.read_csv('options_data/secondary_tickers.csv')
-    primary = pd.read_csv('options_data/primary_tickers.csv')
-    primary_time_tickers = list(zip(primary['Time'], primary['Ticker']))
-    secondary_time_tickers = list(zip(secondary['Time'], secondary['Ticker']))
+        secondary = pd.read_csv('options_data/secondary_tickers.csv', index_col="Time")
+    primary = pd.read_csv('options_data/primary_tickers.csv', index_col="Time")
+    # primary_time_tickers = list(zip(primary['Time'], primary['Ticker']))
+    # secondary_time_tickers = list(zip(secondary['Time'], secondary['Ticker']))
     primary_tickers = list(primary['Ticker'])
     dropped_tickers = []
     for time, ticker in secondary_time_tickers:
@@ -118,7 +142,7 @@ def update_secondary():
         primary_time_tickers.append(item)
     df = pd.DataFrame(primary_time_tickers, columns=['Time', 'Ticker'])
     df.to_csv('options_data/secondary_tickers.csv')
-
+'''
 
 def gather_symbols():
     symbols = []

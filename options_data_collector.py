@@ -91,6 +91,7 @@ def update_tickers():
     fresh_tickers = [item.text for item in items][:100]
     date_format = "%Y-%m-%d"
     date_string = datetime.now().strftime(date_format)
+
     dates = [date_string] * len(fresh_tickers)
     fresh_tickers = pd.Series(dates, index=fresh_tickers)
 
@@ -105,7 +106,8 @@ def update_tickers():
             old_tickers.append(ticker)
         else:
             new_tickers.append(ticker)
-
+    print(date_string)
+    print(fresh_tickers)
     saved_tickers[old_tickers] = fresh_tickers[date_string]
 
     for ticker, date in saved_tickers.iteritems():
@@ -148,18 +150,24 @@ def gather_symbols():
     symbols = []
 
     last_request_time = time.time()
-    secondary = pd.read_csv('options_data/secondary_tickers.csv')
-    tickers = list(zip(secondary['Time'], secondary['Ticker']))
-    for timestamp, ticker in tickers:
+    tickers = pd.read_csv('options_data/tickers.csv')
+    new_columns = tickers.columns.values
+    new_columns[0] = 'ticker'
+    new_columns[1] = 'date'
+    tickers.columns = new_columns
+    tickers = tickers.set_index('ticker')['date'] 
+    for ticker, timestamp in tickers.iteritems():
         from_date = datetime.strptime(timestamp, '%Y-%m-%d')
         to_date = max(get_fridays(from_date))
         if datetime.now() < to_date:
             time.sleep(max(0.001, 0.6 - (time.time() - last_request_time)))
             last_request_time = time.time()
             options_chain = account.get_options_chain(ticker, from_date=from_date, to_date=to_date, strike_count=STRIKE_COUNT)
-            symbols.extend(options_chain.index)
+            if not options_chain is None:
+                symbols.extend(options_chain.index)
+            else:
+                open('options_data/failed_tickers.txt', 'a+').write("Failed on " + str(ticker) + '\n')
             print("Collected: " + str(len(symbols)), end='\r', flush=True)
-
     with open("options_data/symbols.txt", "w+") as symbols_file:
         print("Writing Symbols")
         symbols_file.write("\n".join(symbols))
@@ -169,37 +177,58 @@ def collect_data():
     with open("options_data/symbols.txt", "r") as symbols_file:
         symbols = list(map(lambda x: x.strip(), symbols_file.readlines()))
 
-    symbol_batches = list(divide_chunks(list(divide_chunks(symbols, 350)), 12))
+    symbol_batches = list(divide_chunks(symbols, 350))
     past_time = time.time() - 60*10
     while datetime.now().hour < 16 + TIME_MOD_EST:
         now = time.time()
         if now - past_time >= 60*10:
             print("Collecting Data")
+            start = datetime.now()
             master_df = pd.DataFrame()
             past_time = now
+            last_request_time = time.time()
             for x, symbol_batch in enumerate(symbol_batches):
-                p = Pool(12)
-                quotes = p.map(account.get_quotes, symbol_batch)
-                for quote in quotes:
-                    master_df = master_df.append(quote)
-                quotes = None
-                print('Collected ' + str(x))
-                time.sleep(6)
-            file_name = datetime.now().strftime("%Y-%m-%d_%H:%M:%S") + ".csv"
+                quote = account.get_quotes(symbol_batch)
+                master_df = master_df.append(quote)
+                quote = None
+                print('Collected ' + str(x) + 'th Batch out of ' + str(len(symbol_batches)), end='\r', flush=True)
+                time.sleep(max(0.001, 0.6 - (time.time() - last_request_time)))
+                last_request_time = time.time()
+            file_name = datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + ".csv"
             master_df.to_csv('options_data/' + file_name)
             print('Collected Data For ' + file_name)
+            print(datetime.now()-start)
+    # symbol_batches = list(divide_chunks(list(divide_chunks(symbols, 350)), 12))
+    # past_time = time.time() - 60*10
+    # while datetime.now().hour > 16 + TIME_MOD_EST:
+    #     now = time.time()
+    #     if now - past_time >= 60*10:
+    #         print("Collecting Data")
+    #         master_df = pd.DataFrame()
+    #         past_time = now
+    #         for x, symbol_batch in enumerate(symbol_batches):
+    #             p = Pool(12)
+    #             quotes = p.map(account.get_quotes, symbol_batch)
+    #             for quote in quotes:
+    #                 master_df = master_df.append(quote)
+    #             quotes = None
+    #             print('Collected ' + str(x))
+    #             time.sleep(6)
+    #         file_name = datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + ".csv"
+    #         master_df.to_csv('options_data/' + file_name)
+    #         print('Collected Data For ' + file_name)
 
 
 if __name__ == '__main__':
     initalize()
     if sys.argv[1] == 'update': # Run saturdays 9:30am
-        update_primary()
-        update_secondary()
+        #update_primary()
+        #update_secondary()
         # if sys.argv[2] == 'primary':
         #     update_primary()
         # elif sys.argv[2] == 'secondary':
         #     update_secondary()
-
+        update_tickers()
     elif sys.argv[1] == "list": # Run weekdays at 9:00am
         gather_symbols()
 

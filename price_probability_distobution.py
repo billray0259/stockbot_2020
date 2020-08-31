@@ -93,7 +93,13 @@ def get_pdfs_from_marks(options_chain, distribution=stats.logistic):
 
 def get_pdfs_from_deltas(options_chain, distribution=stats.logistic):
     
-    data = options_chain
+    data = options_chain.loc[:, ["delta", "expirationDate", "putCall", "strikePrice"]]
+    data.replace("NaN", np.nan, inplace=True)
+    len0 = len(data)
+    data.dropna(inplace=True)
+    lenf = len(data)
+    if lenf < len0:
+        print("Warning dropped %d rows containing NaN" % (len0-lenf))
     # Make put deltas positive
     data["delta"] = np.abs(data["delta"])
 
@@ -115,9 +121,10 @@ def get_pdfs_from_deltas(options_chain, distribution=stats.logistic):
         put_x = puts["strikePrice"]
         put_y = puts["delta"]
         
+
         curve = lambda x, u, s: distribution.cdf(x, u, s)
 
-        mark = put_x[0]
+        mark = np.mean(put_x)
 
         call_popt, call_pcov = curve_fit(curve, call_x, call_y, (-mark, mark/10))
         call_popt[0] *= -1
@@ -153,9 +160,10 @@ if __name__ == "__main__":
     acc = Account("keys.json")
 
     symbol = input("Enter Symbol: ")
-    days = int(input("Enter Days Out: "))
+    # days = int(input("Enter Days Out: "))
+    days=32
     # strike_count = int(input("Enter Strike Count: "))
-    strike_count = 50
+    strike_count = 150
 
     # symbol="AMD"
     # days=21
@@ -168,36 +176,113 @@ if __name__ == "__main__":
     # data = pd.read_csv("temp.csv", index_col="symbol")
     mark = acc.get_quotes([symbol])["mark"].iloc[0]
 
-    pdfs = get_pdfs_from_marks(data, distribution=stats.logistic)
-    for i, label in enumerate(pdfs):
-        u, s, errs = pdfs[label]
-        err = 100 * np.linalg.norm(errs / (u, s))
-        label += "\nmean: %.2f±%.2f%%\nstd: %.2f±%.2f%%\n" % (u, 100*errs[0]/u, s, 100*errs[1]/s)
+    pdfs = get_pdfs_from_deltas(data, distribution=stats.logistic)
 
-        distribution = stats.logistic.pdf
+    # days = [0]
+    # means = [mark]
+    # mean_errs = [0]
+    # stds = [0]
+    # std_errs = [0]
 
-        x = np.linspace(u-5*s, u+5*s, 100)
-        y = distribution(x, u, s)
+    days = []
+    means = []
+    mean_errs = []
+    stds = []
+    std_errs = []
 
-        loss_odds = quad(lambda x: distribution(x, u, s), 0, mark)[0]
-        s_sign = 1 if u > mark else -1
-        loss_odds_min = quad(lambda x: distribution(x, u+errs[0], s - errs[1]*s_sign), 0, mark)[0]
-        loss_odds_max = quad(lambda x: distribution(x, u-errs[0], s + errs[1]*s_sign), 0, mark)[0]
+    if True:
+        for label in pdfs:
+            u, s, errs = pdfs[label]
+            means.append(u)
+            mean_errs.append(errs[0])
+            stds.append(s)
+            std_errs.append(errs[1])
 
-        label += "E[return]: %.2f%%\n" % (100 * (u/mark-1))
+            expiration = datetime.strptime(label, "%Y-%m-%d")
+            days.append((expiration - datetime.now()).days)
+        
+        mean_line = lambda x, m, b: m * x + b
+        std_line = lambda x, m, b, c: m * x**c + b
 
-        label += "profit: %.2f%%-%.2f%%-%.2f%%\n" % (100*(1-loss_odds_max), 100*(1-loss_odds), 100*(1-loss_odds_min))
-        label += "err: %.2f\n" % err
-        plt.plot(x, y, label=label)
+        days = np.array(days)
+        means = np.array(means)
+        stds = np.array(stds)
 
-        # print(quad(lambda x: distribution(x, u, s) * x, 0, u)[0])
+        # plt.plot(days, stds)
+        # plt.show()
+        
+        popts, pcov = curve_fit(mean_line, days, means, p0=(1, mark), sigma=mean_errs)
+        mean_m, mean_b = popts
+        
+        popts, pcov = curve_fit(std_line, days[1:], stds, p0=(1, 0, 0.5), bounds=((-np.inf, -np.inf, 0), (np.inf, np.inf, 1)), sigma=std_errs)
+        std_m, std_b, std_c = popts
 
-        op_value = u/2 - quad(lambda x: distribution(x, u, s) * x, -10*u, u)[0]
-        print(op_value)
+        mean = lambda x: mean_line(x, mean_m, mean_b)
+        std = lambda x: std_line(x, std_m, std_b, std_c)
 
-    plt.vlines(mark, *plt.gca().get_ylim(), label="Mark %.4f" % mark)
-    plt.legend()
-    plt.grid(True)
-    plt.title(symbol + " Probability Distributions given Deltas")
-    plt.xlabel("Share price ($)")
-    plt.show()
+        # days = np.linspace(0, expirations[-1], num=128)
+        # means = mean(days)
+        # stds = std(days)
+        days_p = days + 0.1
+        plt.errorbar(days_p, mean(days_p), yerr=std(days_p))
+        plt.errorbar(days[1:], means[1:], yerr=stds, fmt="o")
+        
+        plt.plot([0, days[-1]], [mark, mark], "k")
+        
+
+        # prices = np.linspace(mark - stds[-1], mark + stds[-1], num=128)
+
+        # Z = np.zeros((128, 128))
+        # for r in range(128):
+        #     for c in range(128):
+        #         p = stats.logistic.cdf(prices[r], means[c], stds[c])
+        #         Z[r][c] = max(p, 1-p)
+        # X, Y = np.meshgrid(days, means)
+        # cs = plt.contour(X, Y, Z, levels=np.arange(0, 1, 0.1), colors="k")
+        # plt.clabel(cs, inline=True)
+        # plt.imshow(Z)
+        # plt.set_xticklabels(X)
+        # plt.set_yticklabels(Y)
+        # # plt.legend()
+        plt.show()
+        
+    else:
+
+        for i, label in enumerate(pdfs):
+            u, s, errs = pdfs[label]
+
+            err = 100 * np.linalg.norm(errs / (u, s))
+            label += "\nmean: %.2f±%.2f%%\nstd: %.2f±%.2f%%\n" % (u, 100*errs[0]/u, s, 100*errs[1]/s)
+
+            distribution = stats.logistic
+
+            x = np.linspace(u-5*s, u+5*s, 100)
+            y = distribution.pdf(x, u, s)
+
+            # loss_odds = quad(lambda x: distribution(x, u, s), 0, mark)[0]
+            loss_odds = distribution.cdf(mark, u, s)
+
+            s_sign = 1 if u > mark else -1
+            # loss_odds_min = quad(lambda x: distribution(x, u+errs[0], s - errs[1]*s_sign), 0, mark)[0]
+            loss_odds_min = distribution.cdf(mark, u+errs[0], s - errs[1]*s_sign)
+            # loss_odds_max = quad(lambda x: distribution(x, u-errs[0], s + errs[1]*s_sign), 0, mark)[0]
+            loss_odds_max = distribution.cdf(mark, u-errs[0], s + errs[1]*s_sign)
+
+            label += "E[return]: %.2f%%\n" % (100 * (u/mark-1))
+
+            label += "profit: %.2f%%-%.2f%%-%.2f%%\n" % (100*(1-loss_odds_max), 100*(1-loss_odds), 100*(1-loss_odds_min))
+            label += "err: %.2f\n" % err
+            plt.plot(x, y, label=label)
+
+            # print(quad(lambda x: distribution(x, u, s) * x, 0, u)[0])
+
+            # op_value = u/2 - quad(lambda x: distribution(x, u, s) * x, -10*u, u)[0]
+
+        plt.vlines(mark, *plt.gca().get_ylim(), label="Mark %.4f" % mark)
+        plt.legend()
+        plt.grid(True)
+        plt.title(symbol + " Probability Distributions given Deltas")
+        plt.xlabel("Share price ($)")
+        plt.show()
+
+    

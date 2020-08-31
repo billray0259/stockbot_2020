@@ -13,3 +13,4 @@ single_symbol_stockbot/finnhub_key.txt
 temp.csv
 test.py
 test.ipynb
+daily_delta_bot.py

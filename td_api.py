@@ -26,7 +26,7 @@ class Account:
             "Authorization": "Bearer " + self.access_token
         }
         endpoint = r"https://api.tdameritrade.com/v1/accounts"
-        accounts = self.session.get(url=endpoint, headers=headers).json()
+        accounts = self.session.get(url=endpoint, headers=headers, timeout=20).json()
         self.account = None
         for account in accounts:
             if account["securitiesAccount"]["accountId"] == self.account_id:
@@ -50,7 +50,7 @@ class Account:
             'client_id': self.client_id
         }
 
-        access_token_json = self.session.post(url, headers=headers, data=payload).json()
+        access_token_json = self.session.post(url, headers=headers, data=payload, timeout=20).json()
         try:
             self.access_token = access_token_json["access_token"]
         except KeyError as e:
@@ -58,13 +58,71 @@ class Account:
             print("access_token_json was:", access_token_json)
             exit()
         self.access_token_update = datetime.now()
+    
+    def get_account(self, fields=None):
+        if fields is not None and type(fields) is not str:
+            fields = ",".join(fields)
+        # https://api.tdameritrade.com/v1/accounts/{accountId}
+        header = {
+            'Authorization': "Bearer " + self.access_token,
+        }
+        endpoint = r"https://api.tdameritrade.com/v1/accounts/{}".format(
+            self.account_id)
+
+        payload = {
+            'fields': fields
+        }
+
+        response = self.session.get(url=endpoint, params=payload, headers=header, timeout=20)
+        if response.status_code == 401:
+            self.update_access_token()
+            headers = {'Authorization': "Bearer {}".format(self.access_token)}
+            response = self.session.post(url=endpoint, params=payload, headers=headers, timeout=20)
+        
+        data = response.json()["securitiesAccount"]
+        return data
+    
+    def get_positions(self, include_account_value=False):
+        data = self.get_account(fields="positions")
+        positions = {}
+        if "positions" not in data:
+            if include_account_value:
+                return positions
+            return positions
+
+        for position in data["positions"]:
+            positions[position["instrument"]["symbol"]] = position["longQuantity"] - position["shortQuantity"]
+
+        return positions
+    
+    def get_orders(self):
+        data = self.get_account(fields="orders")
+        orders = pd.DataFrame(columns=["time", "symbol", "amount", "price", "side"])
+        if "orderStrategies" not in data:
+            return orders
+        for order in data["orderStrategies"]:
+            leg = order["orderLegCollection"][0]
+            activity = order["orderActivityCollection"][0]
+
+            row = {}
+            row["amount"] = order["quantity"]
+            row["symbol"] = leg["instrument"]["symbol"]
+            row["time"] = activity["executionLegs"][0]["time"]
+            row["price"] = activity["executionLegs"][0]["price"]
+            row["side"] = leg["instruction"]
+
+            orders = orders.append(row, ignore_index=True)
+        orders["time"] = pd.to_datetime(orders["time"], format="%Y-%m-%dT%H:%M:%S+0000")
+        orders.set_index("time")
+        return orders
+
 
     def place_order(self, ticker, amount, side):
         """ Places makret order with 'DAY' duration and 'NORMAL' session.
         Args:
             ticker (string): Symbol to trade.
-            amount ([type]): Number of shares to trade.
-            side ([type]): BUY or SELL
+            amount ([int]): Number of shares to trade.
+            side ([string]): BUY or SELL
         """
         # https://developer.tdameritrade.com/account-access/apis/post/accounts/%7BaccountId%7D/orders-0
         header = {
@@ -82,7 +140,7 @@ class Account:
             'orderLegCollection': [
                 {
                     'instruction': side,
-                    'quantity': amount,
+                    'quantity': int(amount),
                     'instrument': {
                         'symbol': ticker,
                         'assetType': 'EQUITY'
@@ -91,11 +149,11 @@ class Account:
             ]
         }
 
-        response = self.session.post(url=endpoint, json=payload, headers=header)
+        response = self.session.post(url=endpoint, json=payload, headers=header, timeout=20)
         if response.status_code == 401:
             self.update_access_token()
             headers = {'Authorization': "Bearer {}".format(self.access_token)}
-            response = self.session.post(url=endpoint, json=payload, headers=headers)
+            response = self.session.post(url=endpoint, json=payload, headers=headers, timeout=20)
 
 
     def buy(self, ticker, amount):
@@ -152,11 +210,11 @@ class Account:
             "startDate": start_date_ms,
             "needExtendedHoursData": need_extended_hours_data
         }
-        response = self.session.get(url=endpoint, params=payload, headers=headers)
+        response = self.session.get(url=endpoint, params=payload, headers=headers, timeout=20)
         if response.status_code == 401:
             self.update_access_token()
             headers = {'Authorization': "Bearer {}".format(self.access_token)}
-            response = self.session.get(url=endpoint, params=payload, headers=headers)
+            response = self.session.get(url=endpoint, params=payload, headers=headers, timeout=20)
         elif not response:
             print("Bad response when requesting history for", ticker)
             print(response, response.text)
@@ -214,11 +272,11 @@ class Account:
         else:
             payload["range"] = range_
         
-        response = requests.get(url=endpoint, headers=headers, params=payload)
+        response = self.session.get(url=endpoint, headers=headers, params=payload, timeout=20)
         if response.status_code == 401:
             self.update_access_token()
             headers = {'Authorization': "Bearer {}".format(self.access_token)}
-            response = requests.get(url=endpoint, headers=headers, params=payload)
+            response = self.sessionget(url=endpoint, headers=headers, params=payload, timeout=20)
         
         json_data = response.json()
 
@@ -272,11 +330,11 @@ class Account:
             'symbol': symbols,
         }
         
-        response = requests.get(url=endpoint, headers=headers, params=payload)
+        response = self.session.get(url=endpoint, headers=headers, params=payload, timeout=20)
         if response.status_code == 401:
             self.update_access_token()
             headers = {'Authorization': "Bearer {}".format(self.access_token)}
-            response = requests.get(url=endpoint, headers=headers, params=payload)
+            response = self.session.get(url=endpoint, headers=headers, params=payload, timeout=20)
         if not response:
             print(response, response.text)
             return None

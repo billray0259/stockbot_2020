@@ -86,15 +86,17 @@ def update_tickers():
 
     page = requests.get("https://research.investors.com/options-center/reports/option-volume", headers={"User-Agent": "Chrome"})
     soup = BeautifulSoup(page.text, features="lxml")
-
+    print(soup)
     items = soup.findAll("a", {"class": "stockRoll"})
+    print(items)
     fresh_tickers = [item.text for item in items][:100]
     date_format = "%Y-%m-%d"
     date_string = datetime.now().strftime(date_format)
 
     dates = [date_string] * len(fresh_tickers)
+    print(dates, 'date')
     fresh_tickers = pd.Series(dates, index=fresh_tickers)
-
+    print(saved_tickers, 'saved0')
     if saved_tickers is None:
         fresh_tickers.to_csv(tickers_path)
         return
@@ -106,8 +108,10 @@ def update_tickers():
             old_tickers.append(ticker)
         else:
             new_tickers.append(ticker)
+    print(fresh_tickers, 'fresh')
+    print(old_tickers,'old')
+    print(saved_tickers, 'saved')
     print(date_string)
-    print(fresh_tickers)
     saved_tickers[old_tickers] = fresh_tickers[date_string]
 
     for ticker, date in saved_tickers.iteritems():

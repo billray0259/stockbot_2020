@@ -9,7 +9,7 @@ from datetime import datetime
 
 try:
     dh = DataHandler("optionable", "v=111&f=cap_smallover,sh_curvol_o750,sh_opt_option,sh_price_o2&o=-volume")
-    # dh.save_finviz()
+    dh.save_finviz()
 
     tickers = pd.read_hdf(dh.finviz_file).index
 

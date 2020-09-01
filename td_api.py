@@ -35,10 +35,11 @@ class Account:
         if not self.account:
             print("Account ID not found")
 
-    def update_access_token(self):
+    def update_access_token(self, wait=False):
         """ Uses the refresh_token and client_id to get a fresh access_token.
         """
-
+        if isinstance(wait, (int, float)):
+            time.sleep(wait)
         # https://developer.tdameritrade.com/authentication/apis/post/token-0
         url = r"https://api.tdameritrade.com/v1/oauth2/token"
         headers = {
@@ -56,7 +57,11 @@ class Account:
         except KeyError as e:
             print(e)
             print("access_token_json was:", access_token_json)
-            exit()
+            print('Trying to get access again')
+            if isinstance(wait, bool):
+                wait = 0
+            self.update_access_token(wait+0.5)
+            #exit()
         self.access_token_update = datetime.now()
     
     def get_account(self, fields=None):
@@ -276,7 +281,7 @@ class Account:
         if response.status_code == 401:
             self.update_access_token()
             headers = {'Authorization': "Bearer {}".format(self.access_token)}
-            response = self.sessionget(url=endpoint, headers=headers, params=payload, timeout=20)
+            response = self.session.get(url=endpoint, headers=headers, params=payload, timeout=20)
         
         json_data = response.json()
 
@@ -318,6 +323,10 @@ class Account:
         # ] + an expiration column
         return df
 
+    # def get_large_quotes(self, symbols, chunk_size):
+    #     chunk_list = [symbols[i * chunk_size:(i + 1) * chunk_size] for i in range((len(symbols) + chunk_size - 1) // chunk_size )]
+    #     for chunk in chunk_list:
+
 
     def get_quotes(self, symbols):
         if type(symbols) is not str:
@@ -332,9 +341,34 @@ class Account:
         
         response = self.session.get(url=endpoint, headers=headers, params=payload, timeout=20)
         if response.status_code == 401:
+            """Unathorized Error"""
+            # Our access key probably just expired, Just reset it and try again. -CR
             self.update_access_token()
             headers = {'Authorization': "Bearer {}".format(self.access_token)}
+            time.sleep(0.5)
             response = self.session.get(url=endpoint, headers=headers, params=payload, timeout=20)
+        if response.status_code == 429:
+            """To Many Attempts Error"""
+            # Haven't Really found a good solution to this that would be implemented here
+            # I mostly write the code to avoid this error at all costs. -CR
+            time.sleep(1)
+            return None
+        if response.status_code == 400:
+            """We Requested a Null Value Error"""
+            # Sometimes TD sends back this error on specific requests
+            # Im not really sure why, I think it has to do with the request string being too long
+            # I recursivly cut the request in half and then ask for it again, this seems to fix it -CR
+            first_df = None
+            symbols = symbols.split(',')
+            time.sleep(0.5)
+            while first_df is None:
+                first_df = self.get_quotes(symbols[:len(symbols)//2])
+            time.sleep(0.5)
+            second_df = None
+            while second_df is None:
+                second_df = self.get_quotes(symbols[len(symbols)//2:])
+            return first_df.append(second_df)
+            #response = self.get_quotes(symbols)
         if not response:
             print(response, response.text)
             return None
@@ -351,5 +385,5 @@ class Account:
             return None
         df = pd.concat(dfs)
         df.set_index("symbol", inplace=True)
-
+        #print(symbols)
         return df

@@ -1,15 +1,9 @@
-# from scipy import stats
-# from scipy.integrate import quad
-# import numpy as np
-# import matplotlib.pyplot as plt
 from td_api import Account
 from data_handler import DataHandler
 import pandas as pd
 # from datetime import datetime, timedelta
 
-# def option_price(r, u, s): 
-#     dist = lambda x: stats.logistic.pdf(x, u, s)
-#     return r - quad(lambda x: dist(x) * x, -10*r, r)[0] - r * quad(dist, r, 10*r)[0]
+acc = Account("keys.json")
 
 # x = np.linspace(1000, 2500)
 # y = [option_price(r, 1854, 100) for r in x]
@@ -63,3 +57,4 @@ import pandas as pd
 # data = pd.read_hdf('data/vol500k/finviz.h5')
 # for ticker in data.index:
 #     open('temporary.txt', 'a+').write(ticker +'\n')
+print(acc.get_positions().keys())

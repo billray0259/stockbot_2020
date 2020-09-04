@@ -269,6 +269,10 @@ class DataHandler:
         self.correlation_matrix()
         self.get_groupings()
 
+    def get_save_file(self):
+        """ Returns the save file locaiton of this data Handler"""
+        return self.finviz_file
+
 if __name__ == "__main__":
 
     data_handler = DataHandler("vol500k", "v=111&f=ind_stocksonly,sh_avgvol_o500,sh_price_o2")

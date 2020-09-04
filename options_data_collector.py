@@ -9,8 +9,13 @@ import math
 from multiprocessing import Pool
 from bs4 import BeautifulSoup
 import requests
+from data_handler import DataHandler
+import traceback
 
-#NUM_TICKERS = 100
+
+
+
+NUM_TICKERS = 100
 STRIKE_COUNT = 50
 NUM_QUOTES = 350
 
@@ -73,72 +78,61 @@ def initalize():
         os.mkdir(SAVE_DIR)
 
 
-def update_tickers():
-    """ 
-    options_data/tickers.csv is a series where the index is the tickers and the values are 
-    """
-    tickers_path = os.path.join(SAVE_DIR, "tickers.csv")
-    if not os.path.exists(tickers_path):
-        open(tickers_path, "w").close()
-        saved_tickers = None
-    else:
-        saved_tickers = pd.read_csv(tickers_path)
+def update_available_tickers():
+    try:
+        dh = DataHandler("optionable", "v=111&f=cap_smallover,sh_curvol_o750,sh_opt_option,sh_price_o2&o=-volume")
+        dh.save_finviz()
+        return dh.get_save_file()
+    except Exception as e:
+        print("[%s]" % datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Exception when updating tickers")
+        traceback.print_exc()
+        return None
 
-    page = requests.get("https://research.investors.com/options-center/reports/option-volume", headers={"User-Agent": "Chrome"})
-    soup = BeautifulSoup(page.text, features="lxml")
-    print(soup)
-    items = soup.findAll("a", {"class": "stockRoll"})
-    print(items)
-    fresh_tickers = [item.text for item in items][:100]
-    date_format = "%Y-%m-%d"
-    date_string = datetime.now().strftime(date_format)
+def check_option_volume(data_folder):
+    if data_folder is not None:
+        data = pd.read_hdf(data_folder)
+        to_date = min(get_fridays(datetime.now()))
+        from_date = datetime.now()
+        vals = []
+        last_request_time = time.time()
+        for ticker in data.index:
+            time.sleep(max(0.001, 0.6 - (time.time() - last_request_time)))
+            last_request_time = time.time()
+            options_chain = account.get_options_chain(ticker, from_date=from_date, to_date=to_date, strike_count=STRIKE_COUNT)
+            if not options_chain is None:
+                vals.append((sum(options_chain['totalVolume']), ticker))
+        vals.sort(reverse = True)
+        final = []
+        for tickers in vals:
+            if len(final) == NUM_TICKERS:
+                break
+            final.append(tickers[1])
+        return final
+    return None
 
-    dates = [date_string] * len(fresh_tickers)
-    print(dates, 'date')
-    fresh_tickers = pd.Series(dates, index=fresh_tickers)
-    print(saved_tickers, 'saved0')
-    if saved_tickers is None:
-        fresh_tickers.to_csv(tickers_path)
-        return
-
-    old_tickers = []
-    new_tickers = []
-    for ticker in fresh_tickers:
-        if ticker in saved_tickers:
-            old_tickers.append(ticker)
-        else:
-            new_tickers.append(ticker)
-    print(fresh_tickers, 'fresh')
-    print(old_tickers,'old')
-    print(saved_tickers, 'saved')
-    print(date_string)
-    saved_tickers[old_tickers] = fresh_tickers[date_string]
-
-    for ticker, date in saved_tickers.iteritems():
-        if datetime.strptime(date, date_format) < datetime.now() - timedelta(days=30):
-            del saved_tickers[ticker]
-    
-    saved_tickers.append(fresh_tickers[new_tickers])
-
-    saved_tickers.to_csv(fresh_tickers)
-
-    
+def update_primary():
+    print('Gathering potential data and sorting by options volume')
+    tickers = check_option_volume(update_available_tickers())
+    if tickers is None:
+        tickers = []
+    now = datetime.now().strftime("%Y-%m-%d")
+    df = pd.DataFrame(columns=['Time', 'Ticker'])
+    for ticker in tickers:
+        df = df.append(pd.DataFrame(data={'Time': [now], 'Ticker': [ticker]}), ignore_index=True)
+    print("Saving tickers to primary_tickers.csv")
+    df.to_csv('options_data/primary_tickers.csv')
 
 
-
-'''
 def update_secondary():
-    """ 
-    """
-    if not path.exists('options_data/primary_tickers.csv'):
+    if not os.path.exists('options_data/primary_tickers.csv'):
         update_primary()
-    if not path.exists('options_data/secondary_tickers.csv'):
+    if not os.path.exists('options_data/secondary_tickers.csv'):
         secondary = pd.DataFrame(columns=['Time', 'Ticker'])
     else:
-        secondary = pd.read_csv('options_data/secondary_tickers.csv', index_col="Time")
-    primary = pd.read_csv('options_data/primary_tickers.csv', index_col="Time")
-    # primary_time_tickers = list(zip(primary['Time'], primary['Ticker']))
-    # secondary_time_tickers = list(zip(secondary['Time'], secondary['Ticker']))
+        secondary = pd.read_csv('options_data/secondary_tickers.csv')
+    primary = pd.read_csv('options_data/primary_tickers.csv')
+    primary_time_tickers = list(zip(primary['Time'], primary['Ticker']))
+    secondary_time_tickers = list(zip(secondary['Time'], secondary['Ticker']))
     primary_tickers = list(primary['Ticker'])
     dropped_tickers = []
     for time, ticker in secondary_time_tickers:
@@ -148,18 +142,72 @@ def update_secondary():
         primary_time_tickers.append(item)
     df = pd.DataFrame(primary_time_tickers, columns=['Time', 'Ticker'])
     df.to_csv('options_data/secondary_tickers.csv')
-'''
+
+def update_tickers():
+    update_primary()
+    update_secondary()
+
+# def update_tickers():
+#     """ 
+#     options_data/tickers.csv is a series where the index is the tickers and the values are 
+#     """
+#     tickers_path = os.path.join(SAVE_DIR, "tickers.csv")
+#     if not os.path.exists(tickers_path):
+#         open(tickers_path, "w").close()
+#         saved_tickers = None
+#     else:
+#         saved_tickers = pd.read_csv(tickers_path)
+
+#     page = requests.get("https://research.investors.com/options-center/reports/option-volume", headers={"User-Agent": "Chrome"})
+#     soup = BeautifulSoup(page.text, features="lxml")
+#     print(soup)
+#     items = soup.findAll("a", {"class": "stockRoll"})
+#     print(items)
+#     fresh_tickers = [item.text for item in items][:100]
+#     date_format = "%Y-%m-%d"
+#     date_string = datetime.now().strftime(date_format)
+
+#     dates = [date_string] * len(fresh_tickers)
+#     print(dates, 'date')
+#     fresh_tickers = pd.Series(dates, index=fresh_tickers)
+#     print(saved_tickers, 'saved0')
+#     if saved_tickers is None:
+#         fresh_tickers.to_csv(tickers_path)
+#         return
+
+#     old_tickers = []
+#     new_tickers = []
+#     for ticker in fresh_tickers:
+#         if ticker in saved_tickers:
+#             old_tickers.append(ticker)
+#         else:
+#             new_tickers.append(ticker)
+#     print(fresh_tickers, 'fresh')
+#     print(old_tickers,'old')
+#     print(saved_tickers, 'saved')
+#     print(date_string)
+#     saved_tickers[old_tickers] = fresh_tickers[date_string]
+
+#     for ticker, date in saved_tickers.iteritems():
+#         if datetime.strptime(date, date_format) < datetime.now() - timedelta(days=30):
+#             del saved_tickers[ticker]
+    
+#     saved_tickers.append(fresh_tickers[new_tickers])
+
+#     saved_tickers.to_csv(fresh_tickers)
 
 def gather_symbols():
     symbols = []
 
     last_request_time = time.time()
-    tickers = pd.read_csv('options_data/tickers.csv')
+    tickers = pd.read_csv('options_data/secondary_tickers.csv')
     new_columns = tickers.columns.values
-    new_columns[0] = 'ticker'
+    print(new_columns)
+    new_columns[2] = 'ticker'
     new_columns[1] = 'date'
     tickers.columns = new_columns
     tickers = tickers.set_index('ticker')['date'] 
+    print(tickers)
     for ticker, timestamp in tickers.iteritems():
         from_date = datetime.strptime(timestamp, '%Y-%m-%d')
         to_date = max(get_fridays(from_date))

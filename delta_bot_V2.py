@@ -12,7 +12,7 @@ import pandas as pd
 from tqdm import tqdm
 import traceback
 
-CAPITAL = 10000
+CAPITAL = 20000
 NUM_STOCKS = 10
 
 STATIC_HOLDINGS = {
@@ -22,6 +22,8 @@ STATIC_HOLDINGS = {
 ROUND = True
 
 def get_profiles(tickers, acc):
+
+    positions = acc.get_positions().keys()
 
     profiles = []
     from_date = datetime.now()
@@ -37,7 +39,9 @@ def get_profiles(tickers, acc):
             data = acc.get_options_chain(ticker, from_date, to_date, strike_count=50)
             if data is None:
                 continue
-            mark = acc.get_quotes([ticker])["mark"].iloc[0]
+            price_metric = "bidPrice" if ticker in positions else "askPrice"
+            mark = acc.get_quotes([ticker])[price_metric].iloc[0]
+            
             last_query_time = time.time()
             print("[%s]" % datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Calculating PDF for", ticker, flush=True)
             pdfs = get_pdfs_from_deltas(data, distribution=stats.norm)

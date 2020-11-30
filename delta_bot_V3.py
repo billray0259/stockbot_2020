@@ -2,7 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 from td_api import Account
 from datetime import datetime, timedelta
-from price_probability_distobution import get_pdfs_from_deltas, get_pdfs_from_marks
+from price_probability_distobution import get_pdfs_from_deltas
 from scipy import stats
 from scipy.integrate import quad
 from scipy.optimize import curve_fit, minimize
@@ -12,21 +12,29 @@ import pandas as pd
 from tqdm import tqdm
 import traceback
 
-CAPITAL = 20000
-NUM_STOCKS = 10
-
-STATIC_HOLDINGS = {
-    "TSLA": 10
-}
-
-ROUND = True
+CAPITAL = 5000
+MAX_KELLY = 2
+BLACKLIST = ["CD", "VNET", "TSLA", "SPY"]
+ROUND_SHARES = True
 
 
-def get_optimal_portfolio_weights(avg_returns, covariance_mat):
+KEYS_FILE = "/home/bill/rillion/delta_bot/keys.json"
+TICKERS_FILE = "/home/bill/rillion/delta_bot/tickers.txt"
+COVARIANEC_FILE = "/home/bill/rillion/delta_bot/covariance.csv"
+RISK_FREE_RATE_FILE = "/home/bill/rillion/delta_bot/risk_free_rate.txt"
+
+with open(RISK_FREE_RATE_FILE, "r") as risk_free_rate_file:
+    risk_free_rate = float(risk_free_rate_file.read())
+
+
+def get_optimal_portfolio_weights(avg_returns, stds, covariance_mat):
+    assert (avg_returns.index == stds.index).all() and (avg_returns.index == covariance_mat.index).all(), "avg_returns, stds, and covariance_mat don't have the same index"
+
+    adj_covariance_mat = covariance_mat / np.diag(covariance_mat) * stds**2
 
     def negative_sharpe(weights):
-        avg_return = np.sum(avg_returns * weights)
-        volatility = np.sqrt(np.dot(weights.T, np.dot(covariance_mat, weights)))
+        avg_return = np.sum(avg_returns * weights) * 252
+        volatility = np.sqrt(np.dot(weights.T, np.dot(adj_covariance_mat * 252, weights)))
         return -avg_return / volatility
 
     constraints = ({
@@ -36,26 +44,38 @@ def get_optimal_portfolio_weights(avg_returns, covariance_mat):
 
     bounds = tuple((0, 1) for x in range(len(avg_returns)))
 
-    initial_weights = np.random.random(len(avg_returns))
-    initial_weights /= np.sum(initial_weights)
+    initial_weights = np.ones(len(avg_returns)) / len(avg_returns)
 
     best_weights = minimize(negative_sharpe, initial_weights, method="SLSQP", bounds=bounds, constraints=constraints)["x"]
 
-    return np.round(best_weights, 7)
+    avg_return = np.sum(avg_returns * best_weights) * 252
+    volatility = np.sqrt(np.dot(best_weights.T, np.dot(adj_covariance_mat * 252, best_weights)))
+    print("Avg Return:", avg_return)
+    print("Volatility:", volatility)
+    print("Sharpe Ratio:", avg_return/volatility)
+    kelly = (avg_return - risk_free_rate)/volatility**2
+    print("Kelly Criterion:", kelly)
+    best_weights = pd.Series(np.round(best_weights, 7), avg_returns.index)
+
+    return best_weights[best_weights > 0], kelly
 
 
 def get_returns_and_covariance(tickers, acc):
     # pylint: disable=no-member
     returns = pd.DataFrame()
     last_query_time = 0
+    hist_lengths = []
     for ticker in tickers:
         time.sleep(max(0, 0.6 - (time.time() - last_query_time)))
         print("[%s]" % datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Getting data for", ticker, flush=True)
         history = acc.history(ticker, 1, 365, frequency_type="daily")["close"]
+        hist_lengths.append(len(history))
         last_query_time = time.time()
         returns[ticker] = np.log(history / history.shift(1))
     covariance = returns.cov()
-    return returns.mean() * len(history), covariance * len(history)
+    len_history = np.mean(hist_lengths)
+    return returns.mean() * len_history, covariance * len_history
+
 
 def get_profiles(tickers, acc):
 
@@ -72,13 +92,35 @@ def get_profiles(tickers, acc):
         try:
             time.sleep(max(0, 1.2 - (time.time() - last_query_time)))
             print("[%s]" % datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Getting data for", ticker, flush=True)
-            options_data = acc.get_options_chain(ticker, from_date, to_date, strike_count=50)
-            if options_data is None:
-                continue
+            
 
             stock_history = acc.history(ticker, 30, 365, frequency_type="minute")
             price_metric = "bidPrice" if ticker in positions else "askPrice"
-            mark = acc.get_quotes([ticker])[price_metric].iloc[0]
+            ask = acc.get_quotes([ticker])["askPrice"].iloc[0]
+            bid = acc.get_quotes([ticker])["bidPrice"].iloc[0]
+
+            mark = bid if ticker in positions else ask
+
+            if ticker == "SHV":
+                profile = {}
+                profile["ticker"] = ticker
+                profile["time"] = int(time.time())
+                profile["share_price"] = mark
+                profile["mean"] = mark + risk_free_rate/252
+                profile["std"] = 1e-5 * mark
+                profile["err_mean"] = 0
+                profile["err_std"] = 0
+                # s_sign = 1 if u > mark else -1
+                # loss_odds_max = quad(lambda x: stats.norm.pdf(x, u-errs[0], s + errs[1]*s_sign), 0, mark)[0]
+                # profit_odds = 1 - stats.norm.cdf(mark, u, s)
+                profile["sort_key"] = 0
+
+                profiles = profiles.append(profile, ignore_index=True)
+                continue
+            
+            options_data = acc.get_options_chain(ticker, from_date, to_date, strike_count=50)
+            if options_data is None:
+                continue
 
             last_query_time = time.time()
             print("[%s]" % datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Calculating PDF for", ticker, flush=True)
@@ -168,46 +210,64 @@ if __name__ == "__main__":
     print("[%s]" % datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Starting...", flush=True)
 
     try:
-        tickers = np.loadtxt("/home/bill/rillion/delta_bot/tickers.txt", delimiter="\n", dtype=str)
+        covariance = pd.read_csv(COVARIANEC_FILE, index_col="index")
+        tickers = list(covariance.index)
     except Exception as e:
         print("[%s]" % datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Exception when loading tickers.txt", flush=True)
         traceback.print_exc()
 
     try:
-        acc = Account("/home/bill/rillion/delta_bot/keys.json")
+        acc = Account(KEYS_FILE)
         # acc = Account("keys.json")
     except Exception as e:
         print("[%s]" % datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Exception when creating TD account", flush=True)
         # print(e, flush=True)
 
-    profiles = get_profiles(tickers, acc)
+    try:
+        profiles = get_profiles(tickers, acc)
+        profiles.dropna(inplace=True)
 
-    for ticker in STATIC_HOLDINGS:
-        if ticker in profiles.index:
-            profiles.drop(ticker, inplace=True)
+        for ticker in BLACKLIST:
+            if ticker in profiles.index:
+                profiles.drop(ticker, inplace=True)
 
-    tickers = profiles[:10].index
-    positions = acc.get_positions()
+        tickers = profiles.index
 
-    for ticker in STATIC_HOLDINGS:
-        if ticker in positions:
-            del positions[ticker]
+        positions = acc.get_positions()
 
-    last_query_time = 0
+        for ticker in BLACKLIST:
+            if ticker in positions:
+                del positions[ticker]
+        
+        covariance = covariance.loc[tickers, tickers]
 
-    sell_tickers = [t for t in positions.keys() if not t in tickers]
+        avg_returns = profiles["mean"] / profiles["share_price"] - 1
+        normalized_stds = profiles["std"] / profiles["share_price"]
+        opt_weights, kelly = get_optimal_portfolio_weights(avg_returns, normalized_stds, covariance)
+        opt_weights = opt_weights[opt_weights * CAPITAL > 10]
+        opt_weights /= np.sum(opt_weights)
+        opt_weights *= min(MAX_KELLY, kelly)
+
+        last_query_time = 0
+    except Exception as e:
+        print("[%s]" % datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Exception when getting profiles and calculating opt_weights")
+        traceback.print_exc()
+        print("", end="", flush=True)
+        exit()
+
+    sell_tickers = [t for t in positions.keys() if not t in opt_weights]
     for ticker in sell_tickers:
         print("[%s]" % datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "SELL %d %s" % (positions[ticker], ticker), flush=True)
         time.sleep(max(0, 0.6 - (time.time() - last_query_time)))
         acc.sell(ticker, positions[ticker])
         last_query_time = time.time()
 
-    old_tickers = [t for t in tickers if t in positions.keys()]
+    old_tickers = [t for t in opt_weights.index if t in positions.keys()]
     for ticker in old_tickers:
         mark = profiles["share_price"][ticker]
-        target_shares = CAPITAL / NUM_STOCKS / mark
+        target_shares = CAPITAL * opt_weights[ticker] / mark
         change = target_shares - positions[ticker]
-        change = round(change) if ROUND else int(change)
+        change = round(change) if ROUND_SHARES else int(change)
         percent_change = abs(change * mark / CAPITAL)
         if percent_change > 0.1:
             if change < 0:
@@ -217,11 +277,11 @@ if __name__ == "__main__":
                 print("[%s]" % datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "BUY %d %s" % (change, ticker), flush=True)
                 acc.buy(ticker, change)
 
-    new_tickers = [t for t in tickers if not t in positions.keys()]
+    new_tickers = [t for t in opt_weights.index if not t in positions.keys()]
     for ticker in new_tickers:
         mark = profiles["share_price"][ticker]
-        target_shares = CAPITAL / NUM_STOCKS / mark
-        target_shares = round(target_shares) if ROUND else int(target_shares)
+        target_shares = CAPITAL * opt_weights[ticker] / mark
+        target_shares = round(target_shares) if ROUND_SHARES else int(target_shares)
         print("[%s]" % datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "BUY %d %s" % (target_shares, ticker), flush=True)
         time.sleep(max(0, 0.6 - (time.time() - last_query_time)))
         acc.buy(ticker, target_shares)

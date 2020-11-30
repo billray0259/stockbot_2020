@@ -74,6 +74,7 @@ class DataHandler:
         while pages is None or i < pages*20:
             url = url_base + str(i)
             response = session.get(url)
+            time.sleep(0.1)
             soup = BeautifulSoup(response.text, features="lxml")
 
             tables = soup.find_all("table")
@@ -95,7 +96,7 @@ class DataHandler:
                 for cell in cells:
                     row.append(cell.text)
                 df = df.append(dict(zip(columns, row)), ignore_index=True)
-            print("Collected:", len(df), end="\r", flush=True)
+            print("Collected:", len(df), flush=True)
             i += 20
         df = df.drop(columns=["No."]).set_index("Ticker")
         if (df.values[-1] == df.values[-2]).all():
@@ -269,11 +270,7 @@ class DataHandler:
         self.correlation_matrix()
         self.get_groupings()
 
-    def get_save_file(self):
-        """ Returns the save file locaiton of this data Handler"""
-        return self.finviz_file
-
 if __name__ == "__main__":
 
-    data_handler = DataHandler("vol500k", "v=111&f=ind_stocksonly,sh_avgvol_o500,sh_price_o2")
+    data_handler = DataHandler("vol750k", "v=111&f=ind_stocksonly,sh_avgvol_o750,sh_curvol_o750,sh_price_o2&o=-change")
     data_handler.save_finviz()

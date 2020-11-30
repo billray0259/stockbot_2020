@@ -12,7 +12,7 @@ import pandas as pd
 from tqdm import tqdm
 import traceback
 
-CAPITAL = 20000
+CAPITAL = 0
 NUM_STOCKS = 10
 
 STATIC_HOLDINGS = {
@@ -110,7 +110,8 @@ def get_profiles(tickers, acc):
             s_sign = 1 if u > mark else -1
             # loss_odds_max = quad(lambda x: stats.logistic.pdf(x, u-errs[0], s + errs[1]*s_sign), 0, mark)[0]
             profit_odds = 1 - stats.logistic.cdf(mark, u, s)
-            profile["sort_key"] = (u / mark) * profit_odds
+            # profile["sort_key"] = (u / mark) * profit_odds
+            profile["sort_key"] = profit_odds - ((1-profit_odds) / (u / mark))
 
             if u > mark:
                 profiles = profiles.append(profile, ignore_index=True)

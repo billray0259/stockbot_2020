@@ -28,7 +28,7 @@ data = acc.get_options_chain(symbol, from_date, to_date, strike_count=strike_cou
 mark = acc.get_quotes([symbol])["mark"].iloc[0]
 
 data["time"] = (pd.to_datetime(data["expirationDate"], unit="ms") - datetime.now()).dt.total_seconds() / (60 * 60 * 24)
-data["ptheta"] = data["theta"] / data["mark"]
+# data["ptheta"] = data["theta"] / data["mark"]
 call = data[data["putCall"] == "CALL"]
 put = data[data["putCall"] == "PUT"]
 # put["delta"] = put["delta"] + 1

@@ -215,6 +215,10 @@ class Account:
             "startDate": start_date_ms,
             "needExtendedHoursData": need_extended_hours_data
         }
+
+        if frequency_type != "minute":
+            payload["periodType"] = "year"
+
         response = self.session.get(url=endpoint, params=payload, headers=headers, timeout=20)
         if response.status_code == 401:
             self.update_access_token()

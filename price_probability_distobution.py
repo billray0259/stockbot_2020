@@ -16,10 +16,10 @@ from multiprocessing import Pool
 
 # callback_list = []
 
-def _calc(values):
-    r, u, s, distribution = values
-    dist = lambda x: distribution.pdf(x, u, s)
-    return r - quad(lambda x: dist(x) * x, -np.inf, r)[0] - r * quad(dist, r, np.inf)[0]
+# def _calc(values):
+#     r, u, s, distribution = values
+#     dist = lambda x: distribution.pdf(x, u, s)
+#     return r - quad(lambda x: dist(x) * x, -np.inf, r)[0] - r * quad(dist, r, np.inf)[0]
     # return r - quad(lambda x: dist(x) * x, -10*r, r)[0] - r * (1-distribution.cdf(r, u, s))
     # x1 = np.linspace(-r, r, num=10000)
     # y1 = dist(x1) * x1
@@ -28,21 +28,27 @@ def _calc(values):
     # p = trapz(y2, x1)
     # return r - trapz(y1, x1) - r * trapz(y2, x2)
 
-def get_pdfs_from_marks(options_chain, distribution=stats.logistic):
-    data = options_chain
+
+def get_pdfs_from_marks(options_chain):
+
+    delta_pdfs = get_pdfs_from_deltas(options_chain)
+
+    data = options_chain.loc[:, ["mark", "expirationDate", "putCall", "strikePrice"]]
+    data.replace("NaN", np.nan, inplace=True)
+    len0 = len(data)
+    data.dropna(inplace=True)
+    lenf = len(data)
+    if lenf < len0:
+        print("Warning dropped %d rows containing NaN" % (len0-lenf))
 
     date_groups = data.groupby(["expirationDate"])
 
-    pool = Pool(processes=3)
-
-    pdfs = get_pdfs_from_deltas(data, distribution)
+    pdfs = {}
     for group in date_groups.groups:
         indicies = date_groups.groups[group]
         # Get only the contracts for this single expiration date
         group_data = data.loc[indicies, :]
         label = pd.to_datetime(data["expirationDate"][indicies[0]], unit="ms").strftime("%Y-%m-%d")
-
-        u0, s0, _ = pdfs[label]
 
         calls = group_data[group_data["putCall"] == "CALL"]
         puts = group_data[group_data["putCall"] == "PUT"]
@@ -53,23 +59,34 @@ def get_pdfs_from_marks(options_chain, distribution=stats.logistic):
         put_x = puts["strikePrice"]
         put_y = puts["mark"]
 
-        # intergral_tolerance = mark * 1e-2
+        
 
-        def option_price(rs, u, s):
-            return list(pool.map(_calc, [(r, u, s, distribution) for r in rs]))
-
-        # print("starting call curve fit")
-        call_popt, call_pcov = curve_fit(option_price, call_x, call_y, (-u0, s0))
-        call_popt[0] *= -1
+        def curve(r, u, s):
+            norm = stats.norm(u, s)
+            cdf = norm.cdf
+            pdf = norm.pdf
+            profit_below_strike = u * cdf(r) - s**2 * pdf(r)
+            profit_above_strike = r * (1-cdf(r))
+            return r - profit_below_strike - profit_above_strike
+        
+        call_popt, call_pcov = curve_fit(curve, call_x, call_y, (-mark, mark/10))
+        # call_popt[0] *= -1
         (call_u, call_s) = call_popt
-        # print(call_popt)
+
+        plt.scatter(call_x, call_y)
+        plt.plot(call_x, curve(call_x, call_u, call_s))
+        plt.show()
 
         call_err = np.sqrt(np.sum(np.diag(call_pcov) / call_popt))
 
-        # print("starting put curve fit")
-        put_popt, put_pcov = curve_fit(option_price, put_x, put_y, call_popt)
+        # def put_curve(r, u, s): return distribution.cdf(x, u, s)
+
+        put_popt, put_pcov = curve_fit(curve, put_x, put_y, (mark, mark/10))
         (put_u, put_s) = put_popt
-        # print(put_popt)
+
+        plt.scatter(put_x, put_y)
+        plt.plot(put_x, curve(put_x, put_u, put_s))
+        plt.show()
 
         put_err = np.sqrt(np.sum(np.diag(put_pcov) / put_popt))
 
@@ -87,7 +104,6 @@ def get_pdfs_from_marks(options_chain, distribution=stats.logistic):
         errs = call_errs * call_weight + put_errs * put_weight
 
         pdfs[label] = u, s, errs
-        # print(label, u, s)
 
     return pdfs
 
@@ -132,7 +148,7 @@ def get_pdfs_from_deltas(options_chain, distribution=stats.logistic):
 
         call_err = np.sqrt(np.sum(np.diag(call_pcov) / call_popt))
 
-        put_curve = lambda x, u, s: distribution.cdf(x, u, s)
+        # put_curve = lambda x, u, s: distribution.cdf(x, u, s)
         
         put_popt, put_pcov = curve_fit(curve, put_x, put_y, (mark, mark/10))
         (put_u, put_s) = put_popt
@@ -176,7 +192,7 @@ if __name__ == "__main__":
     # data = pd.read_csv("temp.csv", index_col="symbol")
     mark = acc.get_quotes([symbol])["mark"].iloc[0]
 
-    pdfs = get_pdfs_from_deltas(data, distribution=stats.logistic)
+    pdfs = get_pdfs_from_marks(data)
 
     # days = [0]
     # means = [mark]
@@ -190,7 +206,7 @@ if __name__ == "__main__":
     stds = []
     std_errs = []
 
-    if True:
+    if False:
         for label in pdfs:
             u, s, errs = pdfs[label]
             means.append(u)
@@ -214,7 +230,7 @@ if __name__ == "__main__":
         popts, pcov = curve_fit(mean_line, days, means, p0=(1, mark), sigma=mean_errs)
         mean_m, mean_b = popts
         
-        popts, pcov = curve_fit(std_line, days[1:], stds, p0=(1, 0, 0.5), bounds=((-np.inf, -np.inf, 0), (np.inf, np.inf, 1)), sigma=std_errs)
+        popts, pcov = curve_fit(std_line, days, stds, p0=(1, 0, 0.5), bounds=((-np.inf, -np.inf, 0), (np.inf, np.inf, 1)), sigma=std_errs)
         std_m, std_b, std_c = popts
 
         mean = lambda x: mean_line(x, mean_m, mean_b)
@@ -224,7 +240,7 @@ if __name__ == "__main__":
         # means = mean(days)
         # stds = std(days)
         days_p = days + 0.1
-        plt.errorbar(days_p, mean(days_p), yerr=std(days_p))
+        plt.errorbar(days, mean(days), yerr=std(days))
         plt.errorbar(days[1:], means[1:], yerr=stds, fmt="o")
         
         plt.plot([0, days[-1]], [mark, mark], "k")
